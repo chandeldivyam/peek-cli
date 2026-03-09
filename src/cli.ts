@@ -21,6 +21,7 @@ import {ConfigStore, ensureAppPaths, getAppPaths} from './config.js';
 import {GeminiService} from './gemini.js';
 import {resolveInputFile} from './input.js';
 import {renderAnswer, renderReport} from './output.js';
+import {installLatestRelease} from './self-update.js';
 import {DEFAULT_MODEL, canonicalReportSchema} from './types.js';
 import type {
   AnalyzeOptions,
@@ -257,6 +258,29 @@ async function runAuth(): Promise<void> {
   await ensureApiKey({configStore, forcePrompt: true});
 }
 
+async function runInstall(version?: string): Promise<void> {
+  const progress = spinner();
+  progress.start(
+    version?.trim()
+      ? `Installing peek ${version.trim()}`
+      : 'Installing the latest peek release',
+  );
+
+  try {
+    const result = await installLatestRelease(version);
+    progress.stop('peek install completed');
+    note(result.prefix, 'Install prefix');
+    note(result.tarballUrl, 'Release asset');
+    process.stdout.write(
+      `Installed peek ${result.versionLabel} into ${path.join(result.prefix, 'bin', 'peek')}\n`,
+    );
+    outro('Run `peek --help` to confirm the updated binary.');
+  } catch (error) {
+    progress.error('peek install failed');
+    throw error;
+  }
+}
+
 async function clearCache(file?: string, clearAll = false): Promise<void> {
   await ensureAppPaths(paths);
 
@@ -289,7 +313,7 @@ async function main(): Promise<void> {
   program
     .name('peek')
     .description('Deep video analysis CLI powered by Gemini.')
-    .version('0.1.2')
+    .version('0.1.3')
     .argument('[files...]', 'Explicit video file paths to analyze');
 
   program
@@ -338,6 +362,14 @@ async function main(): Promise<void> {
     .description('Enter and verify your GEMINI_API_KEY.')
     .action(async () => {
       await runAuth();
+    });
+
+  program
+    .command('install')
+    .description('Install or update peek from the latest GitHub Release.')
+    .option('--version <tag>', 'Install a specific release tag, for example v0.1.2')
+    .action(async (options: {version?: string}) => {
+      await runInstall(options.version);
     });
 
   const cacheCommand = program.command('cache').description('Manage the local cache.');
