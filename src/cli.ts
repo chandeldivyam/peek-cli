@@ -277,12 +277,22 @@ async function clearCache(file?: string, clearAll = false): Promise<void> {
 
 async function main(): Promise<void> {
   const program = new Command();
+  const sharedOptionHelp = [
+    'Shared analyze options:',
+    '  --model <model>     Gemini model to use',
+    '  --refresh           Bypass the cache and force a fresh analysis',
+    '  --json              Print JSON instead of rendered text',
+    '  --web / --no-web    Enable or disable grounded web search',
+    '  -o, --output <path> Write the final output to a file',
+  ].join('\n');
 
   program
     .name('peek')
     .description('Deep video analysis CLI powered by Gemini.')
-    .version('0.1.0')
-    .argument('[files...]', 'Explicit video file paths to analyze')
+    .version('0.1.1')
+    .argument('[files...]', 'Explicit video file paths to analyze');
+
+  program
     .addOption(new Option('--model <model>', 'Gemini model to use').default(DEFAULT_MODEL))
     .option('--refresh', 'Bypass the cache and force a fresh analysis', false)
     .option('--json', 'Print JSON instead of rendered text', false)
@@ -300,12 +310,7 @@ async function main(): Promise<void> {
     .command('analyze')
     .description('Analyze one or more explicit video files.')
     .argument('<files...>', 'Explicit video file paths')
-    .addOption(new Option('--model <model>', 'Gemini model to use').default(DEFAULT_MODEL))
-    .option('--refresh', 'Bypass the cache and force a fresh analysis', false)
-    .option('--json', 'Print JSON instead of rendered text', false)
-    .option('--web', 'Enable grounded web search during analysis', true)
-    .option('--no-web', 'Disable grounded web search during analysis')
-    .option('-o, --output <path>', 'Write the final output to a file')
+    .addHelpText('after', `\n${sharedOptionHelp}\n`)
     .action(async (files: string[], options: RuntimeOptions, command: Command) => {
       await analyzeFiles(files, resolveRuntimeOptions(options, command));
     });

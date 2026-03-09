@@ -1,6 +1,6 @@
 {
   "name": "peek",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Deep video analysis CLI powered by Gemini models.",
   "type": "module",
   "bin": {
@@ -12,9 +12,11 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "pnpm@9.15.1",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "pack:release": "mkdir -p .release && pnpm build && npm pack --pack-destination .release",
     "start": "node dist/cli.js"
   },
   "keywords": [
