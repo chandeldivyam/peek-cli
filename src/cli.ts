@@ -289,7 +289,7 @@ async function main(): Promise<void> {
   program
     .name('peek')
     .description('Deep video analysis CLI powered by Gemini.')
-    .version('0.1.1')
+    .version('0.1.2')
     .argument('[files...]', 'Explicit video file paths to analyze');
 
   program

@@ -24,6 +24,6 @@ peek inspect video.mp4
 ## Release Flow
 
 1. Merge changes to `main`.
-2. Create and push a tag like `v0.1.1`.
+2. Create and push a tag like `v0.1.2`.
 3. GitHub Actions builds the CLI, creates `peek.tgz`, and publishes a GitHub Release.
 4. `install.sh` resolves that latest release asset automatically.
