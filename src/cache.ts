@@ -20,7 +20,7 @@ import type {
   CacheIndexEntry,
   CacheIndexFile,
   CanonicalReport,
-  UploadedFileReference,
+  UploadedAssetReference,
   WebMode,
 } from './types.js';
 
@@ -29,13 +29,13 @@ function createEmptyIndex(): CacheIndexFile {
 }
 
 export function buildCacheKey(params: {
-  fileHash: string;
+  sourceHash: string;
   model: string;
   webMode: WebMode;
 }): string {
   return hashString(
     JSON.stringify({
-      fileHash: params.fileHash,
+      sourceHash: params.sourceHash,
       model: params.model,
       promptVersion: PROMPT_VERSION,
       schemaVersion: REPORT_SCHEMA_VERSION,
@@ -69,14 +69,14 @@ export class CacheStore {
     }
   }
 
-  async getLatestByFileHash(fileHash: string): Promise<{
+  async getLatestBySourceHash(sourceHash: string): Promise<{
     entry: CacheIndexEntry;
     report: CanonicalReport;
     renderedText: string;
   } | undefined> {
     const index = await this.readIndex();
     const matchingEntries = index.entries
-      .filter((candidate) => candidate.fileHash === fileHash)
+      .filter((candidate) => candidate.sourceHash === sourceHash)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 
     for (const entry of matchingEntries) {
@@ -96,13 +96,13 @@ export class CacheStore {
 
   async store(params: {
     cacheKey: string;
-    fileHash: string;
-    filePath: string;
+    sourceHash: string;
+    sourceInput: string;
     model: string;
     webMode: WebMode;
     report: CanonicalReport;
     renderedText: string;
-    uploadedFile?: UploadedFileReference;
+    uploadedAssets?: UploadedAssetReference[];
   }): Promise<CacheIndexEntry> {
     await ensureDir(this.paths.reportsDir);
 
@@ -122,8 +122,8 @@ export class CacheStore {
 
     const nextEntry: CacheIndexEntry = {
       cacheKey: params.cacheKey,
-      fileHash: params.fileHash,
-      filePath: params.filePath,
+      sourceHash: params.sourceHash,
+      sourceInput: params.sourceInput,
       reportPath,
       textPath,
       model: params.model,
@@ -132,7 +132,7 @@ export class CacheStore {
       promptVersion: PROMPT_VERSION,
       createdAt: existingEntry?.createdAt ?? now,
       updatedAt: now,
-      ...(params.uploadedFile ? {uploadedFile: params.uploadedFile} : {}),
+      ...(params.uploadedAssets ? {uploadedAssets: params.uploadedAssets} : {}),
     };
 
     const filteredEntries = index.entries.filter(
@@ -152,13 +152,24 @@ export class CacheStore {
     await writeJsonAtomic(this.paths.indexFile, createEmptyIndex());
   }
 
-  async clearByFileHash(fileHash: string): Promise<number> {
+  async clearBySourceHash(sourceHash: string): Promise<number> {
     const index = await this.readIndex();
-    const matching = index.entries.filter((entry) => entry.fileHash === fileHash);
+    const matching = index.entries.filter((entry) => entry.sourceHash === sourceHash);
     for (const entry of matching) {
       await Promise.all([removeIfExists(entry.reportPath), removeIfExists(entry.textPath)]);
     }
-    const remaining = index.entries.filter((entry) => entry.fileHash !== fileHash);
+    const remaining = index.entries.filter((entry) => entry.sourceHash !== sourceHash);
+    await this.writeIndex({version: INDEX_VERSION, entries: remaining});
+    return matching.length;
+  }
+
+  async clearBySourceInput(sourceInput: string): Promise<number> {
+    const index = await this.readIndex();
+    const matching = index.entries.filter((entry) => entry.sourceInput === sourceInput);
+    for (const entry of matching) {
+      await Promise.all([removeIfExists(entry.reportPath), removeIfExists(entry.textPath)]);
+    }
+    const remaining = index.entries.filter((entry) => entry.sourceInput !== sourceInput);
     await this.writeIndex({version: INDEX_VERSION, entries: remaining});
     return matching.length;
   }

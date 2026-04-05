@@ -2,7 +2,7 @@
 
 import 'dotenv/config';
 
-import {mkdir, writeFile} from 'node:fs/promises';
+import {mkdir, stat, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import React from 'react';
@@ -18,21 +18,35 @@ import {Command, Option} from 'commander';
 import {ensureApiKey} from './auth.js';
 import {CacheStore, buildCacheKey} from './cache.js';
 import {ConfigStore, ensureAppPaths, getAppPaths} from './config.js';
+import {
+  buildGenerationId,
+  buildImageCreateRequest,
+  buildVideoCreateRequest,
+  planOutputAssets,
+  toGeneratedOutputAssets,
+} from './generation.js';
+import {GenerationStore} from './generation-store.js';
 import {GeminiService} from './gemini.js';
-import {resolveInputFile} from './input.js';
-import {renderAnswer, renderReport} from './output.js';
+import {resolveInputBundle} from './input.js';
+import {computeFileHash} from './fs-utils.js';
+import {renderAnswer, renderGenerationRecord, renderReport} from './output.js';
+import {isSupportedRemoteUrl} from './remote.js';
 import {installLatestRelease} from './self-update.js';
 import {DEFAULT_MODEL, canonicalReportSchema} from './types.js';
 import type {
   AnalyzeOptions,
   CanonicalReport,
-  ResolvedInputFile,
+  GenerationInputSource,
+  GenerationRecord,
+  ResolvedInputBundle,
+  ResolvedAsset,
   WebMode,
 } from './types.js';
 
 const paths = getAppPaths();
 const configStore = new ConfigStore(paths);
 const cacheStore = new CacheStore(paths);
+const generationStore = new GenerationStore(paths);
 
 interface RuntimeOptions {
   model: string;
@@ -84,14 +98,111 @@ async function persistOutput(outputPath: string, contents: string): Promise<void
   await writeFile(absolutePath, contents);
 }
 
+function collectValues(value: string, previous: string[] = []): string[] {
+  previous.push(value);
+  return previous;
+}
+
+function resolveInheritedOptionValue<T>(
+  command: Command,
+  key: keyof T,
+): T[keyof T] | undefined {
+  let current = command.parent;
+
+  while (current) {
+    const source = current.getOptionValueSource(String(key));
+    if (source && source !== 'default') {
+      return current.opts()[String(key)] as T[keyof T];
+    }
+    current = current.parent;
+  }
+
+  return undefined;
+}
+
+function resolveSubcommandOptions<T extends Record<string, unknown>>(command: Command): T {
+  const localOptions = command.opts() as T;
+
+  for (const key of Object.keys(localOptions) as Array<keyof T>) {
+    if (command.getOptionValueSource(String(key)) === 'default') {
+      const inheritedValue = resolveInheritedOptionValue<T>(command, key);
+      if (typeof inheritedValue !== 'undefined') {
+        localOptions[key] = inheritedValue;
+      }
+    }
+  }
+
+  return localOptions;
+}
+
+async function resolveGenerationSource(rawInput: string): Promise<{
+  rawInput: string;
+  source: ResolvedInputBundle['source'];
+  assets: ResolvedAsset[];
+}> {
+  const bundle = await resolveInputBundle({rawInput, paths});
+  return {
+    rawInput,
+    source: bundle.source,
+    assets: bundle.assets,
+  };
+}
+
+function toGenerationInputSources(
+  inputSources: Array<{
+    source: ResolvedInputBundle['source'];
+    assets: ResolvedAsset[];
+  }>,
+): GenerationInputSource[] {
+  return inputSources.map((inputSource) => ({
+    source: inputSource.source,
+    assets: inputSource.assets.map((asset) => ({
+      index: asset.index,
+      kind: asset.kind,
+      path: asset.absolutePath,
+      hash: asset.hash,
+      sizeBytes: asset.sizeBytes,
+      mimeType: asset.mimeType,
+      modifiedTime: asset.modifiedTime,
+    })),
+  }));
+}
+
+async function collectStoredOutputs(pathsToInspect: Array<{
+  path: string;
+  mimeType: string;
+  kind: 'image' | 'video';
+}>): Promise<
+  Array<{
+    path: string;
+    hash: string;
+    sizeBytes: number;
+    mimeType: string;
+    kind: 'image' | 'video';
+  }>
+> {
+  return await Promise.all(
+    pathsToInspect.map(async (output) => {
+      const fileInfo = await stat(output.path);
+      return {
+        path: output.path,
+        hash: await computeFileHash(output.path),
+        sizeBytes: fileInfo.size,
+        mimeType: output.mimeType,
+        kind: output.kind,
+      };
+    }),
+  );
+}
+
 async function loadOrAnalyzeReport(params: {
-  input: ResolvedInputFile;
+  bundle: ResolvedInputBundle;
   options: AnalyzeOptions;
   gemini: GeminiService;
   quiet?: boolean;
 }): Promise<{report: CanonicalReport; renderedText: string}> {
   const cacheKey = buildCacheKey({
-    fileHash: params.input.hash,
+    sourceHash: params.bundle.sourceHash,
     model: params.options.model,
     webMode: params.options.webMode,
   });
@@ -100,23 +211,22 @@ async function loadOrAnalyzeReport(params: {
     const cached = await cacheStore.getByCacheKey(cacheKey);
     if (cached) {
       if (!params.quiet) {
-        log.success(`Cache hit for ${params.input.displayPath}`);
+        log.success(`Cache hit for ${params.bundle.source.displayLabel}`);
       }
       return {report: cached.report, renderedText: cached.renderedText};
     }
   }
 
   const progress = spinner();
-  progress.start(`Analyzing ${params.input.displayPath}`);
-  const latest = await cacheStore.getLatestByFileHash(params.input.hash);
+  progress.start(`Analyzing ${params.bundle.source.displayLabel}`);
+  const latest = await cacheStore.getLatestBySourceHash(params.bundle.sourceHash);
+
   try {
-    const result = await params.gemini.analyzeVideo({
-      input: params.input,
+    const result = await params.gemini.analyzeBundle({
+      bundle: params.bundle,
       model: params.options.model,
       webMode: params.options.webMode,
-      ...(latest?.entry.uploadedFile
-        ? {uploadedFile: latest.entry.uploadedFile}
-        : {}),
+      ...(latest?.entry.uploadedAssets ? {uploadedAssets: latest.entry.uploadedAssets} : {}),
       onProgress(message) {
         progress.message(message);
       },
@@ -125,36 +235,39 @@ async function loadOrAnalyzeReport(params: {
     const renderedText = renderReport(result.report);
     await cacheStore.store({
       cacheKey,
-      fileHash: params.input.hash,
-      filePath: params.input.absolutePath,
+      sourceHash: params.bundle.sourceHash,
+      sourceInput: params.bundle.source.originalInput,
       model: params.options.model,
       webMode: params.options.webMode,
       report: result.report,
       renderedText,
-      ...(result.uploadedFile ? {uploadedFile: result.uploadedFile} : {}),
+      ...(result.uploadedAssets ? {uploadedAssets: result.uploadedAssets} : {}),
     });
-    progress.stop(`Analysis complete for ${params.input.displayPath}`);
+    progress.stop(`Analysis complete for ${params.bundle.source.displayLabel}`);
     return {report: result.report, renderedText};
   } catch (error) {
-    progress.error(`Analysis failed for ${params.input.displayPath}`);
+    progress.error(`Analysis failed for ${params.bundle.source.displayLabel}`);
     throw error;
   }
 }
 
-async function analyzeFiles(rawFiles: string[], options: RuntimeOptions): Promise<void> {
+async function analyzeSources(rawInputs: string[], options: RuntimeOptions): Promise<void> {
   await ensureAppPaths(paths);
   const apiKey = await ensureApiKey({configStore});
   const gemini = new GeminiService(apiKey);
-
-  const resolvedFiles = await Promise.all(rawFiles.map((rawFile) => resolveInputFile(rawFile)));
   const reports: CanonicalReport[] = [];
   const renderedOutputs: string[] = [];
 
   intro('peek');
 
-  for (const input of resolvedFiles) {
+  for (const rawInput of rawInputs) {
+    const bundle = await resolveInputBundle({
+      rawInput,
+      paths,
+      refresh: options.refresh,
+    });
     const loaded = await loadOrAnalyzeReport({
-      input,
+      bundle,
       options: {
         model: options.model,
         refresh: options.refresh,
@@ -184,17 +297,17 @@ async function analyzeFiles(rawFiles: string[], options: RuntimeOptions): Promis
   );
 }
 
-async function inspectFile(rawFile: string): Promise<void> {
+async function inspectSource(rawInput: string): Promise<void> {
   await ensureAppPaths(paths);
-  const input = await resolveInputFile(rawFile);
+  const bundle = await resolveInputBundle({rawInput, paths});
   let report: CanonicalReport | undefined =
-    (await cacheStore.getLatestByFileHash(input.hash))?.report;
+    (await cacheStore.getLatestBySourceHash(bundle.sourceHash))?.report;
 
   if (!report) {
     const apiKey = await ensureApiKey({configStore});
     const gemini = new GeminiService(apiKey);
     const loaded = await loadOrAnalyzeReport({
-      input,
+      bundle,
       options: {
         model: DEFAULT_MODEL,
         refresh: false,
@@ -214,14 +327,14 @@ async function inspectFile(rawFile: string): Promise<void> {
   await app.waitUntilExit();
 }
 
-async function askQuestion(rawFile: string, question: string, web: boolean): Promise<void> {
+async function askQuestion(rawInput: string, question: string, web: boolean): Promise<void> {
   await ensureAppPaths(paths);
-  const input = await resolveInputFile(rawFile);
+  const bundle = await resolveInputBundle({rawInput, paths});
   const apiKey = await ensureApiKey({configStore});
   const gemini = new GeminiService(apiKey);
 
   const baseReport = await loadOrAnalyzeReport({
-    input,
+    bundle,
     options: {
       model: DEFAULT_MODEL,
       refresh: false,
@@ -231,16 +344,16 @@ async function askQuestion(rawFile: string, question: string, web: boolean): Pro
     quiet: true,
   });
 
-  const cached = await cacheStore.getLatestByFileHash(input.hash);
+  const cached = await cacheStore.getLatestBySourceHash(bundle.sourceHash);
   const progress = spinner();
-  progress.start(`Answering question for ${input.displayPath}`);
+  progress.start(`Answering question for ${bundle.source.displayLabel}`);
   try {
     const answer = await gemini.answerQuestion({
       report: baseReport.report,
       question,
       webMode: normalizeWebMode(web),
-      ...(web ? {input} : {}),
-      ...(cached?.entry.uploadedFile ? {uploadedFile: cached.entry.uploadedFile} : {}),
+      ...(web ? {bundle} : {}),
+      ...(cached?.entry.uploadedAssets ? {uploadedAssets: cached.entry.uploadedAssets} : {}),
       onProgress(message) {
         progress.message(message);
       },
@@ -249,6 +362,244 @@ async function askQuestion(rawFile: string, question: string, web: boolean): Pro
     process.stdout.write(`${renderAnswer(answer)}\n`);
   } catch (error) {
     progress.error('Question failed');
+    throw error;
+  }
+}
+
+async function createImage(prompt: string, options: {
+  model?: string;
+  input: string[];
+  count?: number;
+  aspectRatio?: string;
+  size?: '1K' | '2K' | '4K';
+  personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
+  output?: string;
+  json?: boolean;
+}): Promise<void> {
+  await ensureAppPaths(paths);
+  const apiKey = await ensureApiKey({configStore});
+  const gemini = new GeminiService(apiKey);
+  const inputSources = await Promise.all((options.input ?? []).map((input) => resolveGenerationSource(input)));
+  const request = buildImageCreateRequest({
+    prompt,
+    inputSources,
+    ...(options.model ? {model: options.model} : {}),
+    ...(typeof options.count === 'number' ? {count: options.count} : {}),
+    ...(options.aspectRatio ? {aspectRatio: options.aspectRatio} : {}),
+    ...(options.size ? {imageSize: options.size} : {}),
+    ...(options.personGeneration ? {personGeneration: options.personGeneration} : {}),
+    ...(options.output ? {outputPath: options.output} : {}),
+    ...(typeof options.json === 'boolean' ? {json: options.json} : {}),
+  });
+
+  intro('peek create image');
+  const progress = spinner();
+  progress.start(`Generating image with ${request.modelChoice.model}`);
+
+  try {
+    const generatedOutputs = await gemini.generateImages({
+      prompt: request.prompt,
+      model: request.modelChoice.model,
+      count: request.count,
+      ...(request.aspectRatio ? {aspectRatio: request.aspectRatio} : {}),
+      ...(request.imageSize ? {imageSize: request.imageSize} : {}),
+      ...(request.personGeneration ? {personGeneration: request.personGeneration} : {}),
+      inputAssets: request.inputSources.flatMap((inputSource) => inputSource.assets),
+      onProgress(message) {
+        progress.message(message);
+      },
+    });
+
+    const plannedOutputs = planOutputAssets({
+      kind: 'image',
+      count: generatedOutputs.length,
+      mimeTypes: generatedOutputs.map((output) => output.mimeType),
+      prompt: request.prompt,
+      ...(request.outputPath ? {outputPath: request.outputPath} : {}),
+    });
+
+    for (const plannedOutput of plannedOutputs) {
+      await mkdir(path.dirname(plannedOutput.path), {recursive: true});
+    }
+
+    await Promise.all(
+      generatedOutputs.map((output, index) =>
+        writeFile(plannedOutputs[index]!.path, output.bytes),
+      ),
+    );
+
+    const createdAt = new Date().toISOString();
+    const record: GenerationRecord = {
+      id: buildGenerationId(),
+      kind: 'image',
+      mode: inputSources.length > 0 ? 'edit' : 'prompt',
+      createdAt,
+      model: request.modelChoice.model,
+      ...(request.modelChoice.alias ? {modelAlias: request.modelChoice.alias} : {}),
+      prompt: request.prompt,
+      inputs: toGenerationInputSources(request.inputSources),
+      outputs: toGeneratedOutputAssets({
+        createdAt,
+        outputs: await collectStoredOutputs(
+          plannedOutputs.map((plannedOutput) => ({
+            path: plannedOutput.path,
+            mimeType: plannedOutput.mimeType,
+            kind: plannedOutput.kind,
+          })),
+        ),
+      }),
+      options: {
+        count: request.count,
+        ...(request.aspectRatio ? {aspectRatio: request.aspectRatio} : {}),
+        ...(request.imageSize ? {imageSize: request.imageSize} : {}),
+        ...(request.personGeneration ? {personGeneration: request.personGeneration} : {}),
+        input: options.input,
+      },
+    };
+
+    await generationStore.store(record);
+    progress.stop('Image generation complete');
+
+    process.stdout.write(
+      request.json
+        ? `${JSON.stringify(record, null, 2)}\n`
+        : `${renderGenerationRecord(record)}\n`,
+    );
+    outro('peek finished.');
+  } catch (error) {
+    progress.error('Image generation failed');
+    throw error;
+  }
+}
+
+async function createVideo(prompt: string, options: {
+  model?: string;
+  image?: string;
+  lastFrame?: string;
+  reference: string[];
+  video?: string;
+  aspectRatio?: '16:9' | '9:16';
+  resolution?: '720p' | '1080p' | '4k';
+  duration?: number;
+  personGeneration?: 'allow_all' | 'allow_adult';
+  negativePrompt?: string;
+  seed?: number;
+  output?: string;
+  json?: boolean;
+}): Promise<void> {
+  await ensureAppPaths(paths);
+  const apiKey = await ensureApiKey({configStore});
+  const gemini = new GeminiService(apiKey);
+
+  const imageSource = options.image ? await resolveGenerationSource(options.image) : undefined;
+  const lastFrameSource = options.lastFrame
+    ? await resolveGenerationSource(options.lastFrame)
+    : undefined;
+  const referenceSources = await Promise.all(
+    (options.reference ?? []).map((input) => resolveGenerationSource(input)),
+  );
+  const videoSource = options.video ? await resolveGenerationSource(options.video) : undefined;
+
+  const request = buildVideoCreateRequest({
+    prompt,
+    ...(imageSource ? {imageSource} : {}),
+    ...(lastFrameSource ? {lastFrameSource} : {}),
+    referenceSources,
+    ...(videoSource ? {videoSource} : {}),
+    ...(options.model ? {model: options.model} : {}),
+    ...(options.aspectRatio ? {aspectRatio: options.aspectRatio} : {}),
+    ...(typeof options.duration === 'number'
+      ? {durationSeconds: options.duration as 4 | 6 | 8}
+      : {}),
+    ...(options.resolution ? {resolution: options.resolution} : {}),
+    ...(options.personGeneration ? {personGeneration: options.personGeneration} : {}),
+    ...(options.negativePrompt ? {negativePrompt: options.negativePrompt} : {}),
+    ...(typeof options.seed === 'number' ? {seed: options.seed} : {}),
+    ...(options.output ? {outputPath: options.output} : {}),
+    ...(typeof options.json === 'boolean' ? {json: options.json} : {}),
+  });
+
+  intro('peek create video');
+  const progress = spinner();
+  progress.start(`Generating video with ${request.modelChoice.model}`);
+
+  try {
+    const plannedOutputs = planOutputAssets({
+      kind: 'video',
+      count: 1,
+      mimeTypes: ['video/mp4'],
+      prompt: request.prompt,
+      ...(request.outputPath ? {outputPath: request.outputPath} : {}),
+    });
+
+    const plannedOutput = plannedOutputs[0]!;
+    await mkdir(path.dirname(plannedOutput.path), {recursive: true});
+
+    const result = await gemini.generateVideo({
+      prompt: request.prompt,
+      model: request.modelChoice.model,
+      aspectRatio: request.aspectRatio,
+      durationSeconds: request.durationSeconds,
+      resolution: request.resolution,
+      personGeneration: request.personGeneration,
+      ...(request.negativePrompt ? {negativePrompt: request.negativePrompt} : {}),
+      ...(typeof request.seed === 'number' ? {seed: request.seed} : {}),
+      ...(request.image ? {image: request.image} : {}),
+      ...(request.lastFrame ? {lastFrame: request.lastFrame} : {}),
+      references: request.references,
+      ...(request.video ? {video: request.video} : {}),
+      outputPath: plannedOutput.path,
+      onProgress(message) {
+        progress.message(message);
+      },
+    });
+
+    const createdAt = new Date().toISOString();
+    const record: GenerationRecord = {
+      id: buildGenerationId(),
+      kind: 'video',
+      mode: request.mode,
+      createdAt,
+      model: request.modelChoice.model,
+      ...(request.modelChoice.alias ? {modelAlias: request.modelChoice.alias} : {}),
+      prompt: request.prompt,
+      inputs: toGenerationInputSources(request.inputSources),
+      outputs: toGeneratedOutputAssets({
+        createdAt,
+        outputs: await collectStoredOutputs([
+          {
+            path: plannedOutput.path,
+            mimeType: result.mimeType,
+            kind: 'video',
+          },
+        ]),
+      }),
+      options: {
+        aspectRatio: request.aspectRatio,
+        durationSeconds: request.durationSeconds,
+        resolution: request.resolution,
+        personGeneration: request.personGeneration,
+        ...(request.negativePrompt ? {negativePrompt: request.negativePrompt} : {}),
+        ...(typeof request.seed === 'number' ? {seed: request.seed} : {}),
+        ...(options.image ? {image: options.image} : {}),
+        ...(options.lastFrame ? {lastFrame: options.lastFrame} : {}),
+        reference: options.reference,
+        ...(options.video ? {video: options.video} : {}),
+      },
+      ...(result.operationName ? {operationName: result.operationName} : {}),
+    };
+
+    await generationStore.store(record);
+    progress.stop('Video generation complete');
+
+    process.stdout.write(
+      request.json
+        ? `${JSON.stringify(record, null, 2)}\n`
+        : `${renderGenerationRecord(record)}\n`,
+    );
+    outro('peek finished.');
+  } catch (error) {
+    progress.error('Video generation failed');
     throw error;
   }
 }
@@ -281,7 +632,7 @@ async function runInstall(version?: string): Promise<void> {
   }
 }
 
-async function clearCache(file?: string, clearAll = false): Promise<void> {
+async function clearCache(source?: string, clearAll = false): Promise<void> {
   await ensureAppPaths(paths);
 
   if (clearAll) {
@@ -290,12 +641,14 @@ async function clearCache(file?: string, clearAll = false): Promise<void> {
     return;
   }
 
-  if (!file) {
-    throw new Error('Pass a file path or use --all.');
+  if (!source) {
+    throw new Error('Pass a file path, URL, or use --all.');
   }
 
-  const input = await resolveInputFile(file);
-  const removedEntries = await cacheStore.clearByFileHash(input.hash);
+  const removedEntries = isSupportedRemoteUrl(source)
+    ? await cacheStore.clearBySourceInput(source)
+    : await cacheStore.clearBySourceHash((await resolveInputBundle({rawInput: source, paths})).sourceHash);
+
   log.success(`Removed ${removedEntries} cached entr${removedEntries === 1 ? 'y' : 'ies'}.`);
 }
 
@@ -312,9 +665,10 @@ async function main(): Promise<void> {
 
   program
     .name('peek')
-    .description('Deep video analysis CLI powered by Gemini.')
-    .version('0.1.3')
-    .argument('[files...]', 'Explicit video file paths to analyze');
+    .description('Media analysis CLI for local files, Instagram, and YouTube.')
+    .enablePositionalOptions()
+    .version('0.2.0')
+    .argument('[sources...]', 'Explicit image/video file paths or supported URLs to analyze');
 
   program
     .addOption(new Option('--model <model>', 'Gemini model to use').default(DEFAULT_MODEL))
@@ -323,38 +677,38 @@ async function main(): Promise<void> {
     .option('--web', 'Enable grounded web search during analysis', true)
     .option('--no-web', 'Disable grounded web search during analysis')
     .option('-o, --output <path>', 'Write the final output to a file')
-    .action(async (files: string[], options: RuntimeOptions, command: Command) => {
-      if (!files || files.length === 0) {
+    .action(async (sources: string[], options: RuntimeOptions, command: Command) => {
+      if (!sources || sources.length === 0) {
         program.help();
       }
-      await analyzeFiles(files, resolveRuntimeOptions(options, command));
+      await analyzeSources(sources, resolveRuntimeOptions(options, command));
     });
 
   program
     .command('analyze')
-    .description('Analyze one or more explicit video files.')
-    .argument('<files...>', 'Explicit video file paths')
+    .description('Analyze one or more explicit image/video files or supported URLs.')
+    .argument('<sources...>', 'Explicit file paths or supported URLs')
     .addHelpText('after', `\n${sharedOptionHelp}\n`)
-    .action(async (files: string[], options: RuntimeOptions, command: Command) => {
-      await analyzeFiles(files, resolveRuntimeOptions(options, command));
+    .action(async (sources: string[], options: RuntimeOptions, command: Command) => {
+      await analyzeSources(sources, resolveRuntimeOptions(options, command));
     });
 
   program
     .command('inspect')
     .description('Open the Ink inspector for a cached report.')
-    .argument('<file>', 'Video file path')
-    .action(async (file: string) => {
-      await inspectFile(file);
+    .argument('<source>', 'File path or supported URL')
+    .action(async (source: string) => {
+      await inspectSource(source);
     });
 
   program
     .command('ask')
     .description('Ask a follow-up question using the cached canonical report.')
-    .argument('<file>', 'Video file path')
+    .argument('<source>', 'File path or supported URL')
     .argument('<question>', 'Question to ask')
-    .option('--web', 'Re-ground the answer on live web results and the video', false)
-    .action(async (file: string, question: string, options: {web: boolean}) => {
-      await askQuestion(file, question, options.web);
+    .option('--web', 'Re-ground the answer on live web results and the media bundle', false)
+    .action(async (source: string, question: string, options: {web: boolean}) => {
+      await askQuestion(source, question, options.web);
     });
 
   program
@@ -372,14 +726,87 @@ async function main(): Promise<void> {
       await runInstall(options.version);
     });
 
+  const createCommand = program.command('create').description('Generate images or videos with Google models.');
+  createCommand
+    .command('image')
+    .description('Generate one or more images with Nano Banana.')
+    .argument('<prompt>', 'Prompt to generate from')
+    .addOption(new Option('--model <model>', 'Image model alias or raw model id').default('flash'))
+    .option('--input <source>', 'Reference image input (repeatable)', collectValues, [])
+    .option('--count <count>', 'Number of images to generate', (value) => Number.parseInt(value, 10), 1)
+    .option('--aspect-ratio <ratio>', 'Image aspect ratio, for example 1:1 or 16:9')
+    .option('--size <size>', 'Image size: 1K, 2K, or 4K')
+    .option('--person-generation <mode>', 'allow_all, allow_adult, or allow_none')
+    .option('--json', 'Print generation metadata as JSON', false)
+    .option('-o, --output <path>', 'Output file or directory for generated assets')
+    .action(async function (
+      this: Command,
+      prompt: string,
+    ) {
+      await createImage(
+        prompt,
+        resolveSubcommandOptions(this) as {
+          model?: string;
+          input: string[];
+          count?: number;
+          aspectRatio?: string;
+          size?: '1K' | '2K' | '4K';
+          personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
+          output?: string;
+          json?: boolean;
+        },
+      );
+    });
+
+  createCommand
+    .command('video')
+    .description('Generate a video with Veo 3.1.')
+    .argument('<prompt>', 'Prompt to generate from')
+    .addOption(new Option('--model <model>', 'Video model alias or raw model id').default('fast'))
+    .option('--image <source>', 'Single input image for image-to-video')
+    .option('--last-frame <source>', 'Single final image for interpolation')
+    .option('--reference <source>', 'Reference image input (repeatable, max 3)', collectValues, [])
+    .option('--video <source>', 'Single input video for extension')
+    .option('--aspect-ratio <ratio>', '16:9 or 9:16', '16:9')
+    .option('--resolution <resolution>', '720p, 1080p, or 4k', '720p')
+    .option('--duration <seconds>', '4, 6, or 8 seconds', (value) => Number.parseInt(value, 10), 4)
+    .option('--person-generation <mode>', 'allow_all or allow_adult')
+    .option('--negative-prompt <text>', 'Tell Veo what to avoid')
+    .option('--seed <seed>', 'Random seed', (value) => Number.parseInt(value, 10))
+    .option('--json', 'Print generation metadata as JSON', false)
+    .option('-o, --output <path>', 'Output file or directory for generated assets')
+    .action(async function (
+      this: Command,
+      prompt: string,
+    ) {
+      await createVideo(
+        prompt,
+        resolveSubcommandOptions(this) as {
+          model?: string;
+          image?: string;
+          lastFrame?: string;
+          reference: string[];
+          video?: string;
+          aspectRatio?: '16:9' | '9:16';
+          resolution?: '720p' | '1080p' | '4k';
+          duration?: number;
+          personGeneration?: 'allow_all' | 'allow_adult';
+          negativePrompt?: string;
+          seed?: number;
+          output?: string;
+          json?: boolean;
+        },
+      );
+    });
+
   const cacheCommand = program.command('cache').description('Manage the local cache.');
   cacheCommand
     .command('clear')
-    .description('Clear cached reports for a file or for the whole cache.')
-    .argument('[file]', 'Video file path')
+    .description('Clear cached reports for a source or for the whole cache.')
+    .argument('[source]', 'File path or supported URL')
     .option('--all', 'Clear the entire cache index', false)
-    .action(async (file: string | undefined, options: {all: boolean}) => {
-      await clearCache(file, options.all);
+    .action(async (source: string | undefined, options: {all: boolean}) => {
+      await clearCache(source, options.all);
     });
 
   await program.parseAsync(process.argv);

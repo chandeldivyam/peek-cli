@@ -3,7 +3,7 @@ import {Box, Text, useApp, useInput} from 'ink';
 
 import type {CanonicalReport} from './types.js';
 
-const tabs = ['Summary', 'Timeline', 'Entities', 'Sources', 'Meta'] as const;
+const tabs = ['Summary', 'Segments', 'Entities', 'Assets', 'Sources', 'Meta'] as const;
 
 function joinOrNone(items: string[]): string {
   return items.length > 0 ? items.join(', ') : 'None';
@@ -56,18 +56,26 @@ export function InspectApp(props: {report: CanonicalReport}) {
             props.report.analysis.summary,
             '',
             props.report.analysis.detailedOverview,
+            '',
+            ...props.report.analysis.assetSummaries.map(
+              (summary) => `Asset ${summary.assetIndex + 1}: ${summary.summary}`,
+            ),
           ]}
         />
       );
     }
 
-    if (currentTab === 'Timeline') {
+    if (currentTab === 'Segments') {
       return (
         <Section
-          title="Timeline"
-          body={props.report.analysis.chapters.map((chapter) => {
-            const range = chapter.end ? `${chapter.start} -> ${chapter.end}` : chapter.start;
-            return `${range} | ${chapter.title} | ${chapter.description}`;
+          title="Segments"
+          body={props.report.analysis.segments.map((segment) => {
+            const range = segment.start
+              ? segment.end
+                ? `${segment.start} -> ${segment.end}`
+                : segment.start
+              : 'No timestamp';
+            return `Asset ${segment.assetIndex + 1} | ${range} | ${segment.title} | ${segment.description}`;
           })}
         />
       );
@@ -84,7 +92,19 @@ export function InspectApp(props: {report: CanonicalReport}) {
             `Brands: ${joinOrNone(props.report.analysis.brands)}`,
             `On-Screen Text: ${joinOrNone(props.report.analysis.onScreenText)}`,
             `Themes: ${joinOrNone(props.report.analysis.themes)}`,
+            `Audio: ${props.report.analysis.audioSummary || 'None'}`,
           ]}
+        />
+      );
+    }
+
+    if (currentTab === 'Assets') {
+      return (
+        <Section
+          title="Assets"
+          body={props.report.assets.map((asset) =>
+            `Asset ${asset.index + 1}: ${asset.kind} | ${asset.mimeType} | ${asset.path}`,
+          )}
         />
       );
     }
@@ -106,8 +126,9 @@ export function InspectApp(props: {report: CanonicalReport}) {
       <Section
         title="Meta"
         body={[
-          `File: ${props.report.file.path}`,
-          `Hash: ${props.report.file.hash}`,
+          `Source: ${props.report.source.displayLabel}`,
+          `Original input: ${props.report.source.originalInput}`,
+          `Provider: ${props.report.source.provider || 'local'}`,
           `Model: ${props.report.model}`,
           `Generated: ${props.report.generatedAt}`,
           `Web mode: ${props.report.webMode}`,
@@ -138,7 +159,7 @@ export function InspectApp(props: {report: CanonicalReport}) {
         {content}
       </Box>
       <Box marginTop={1}>
-        <Text color="gray">Use left/right arrows or 1-5 to switch tabs. Press q to exit.</Text>
+        <Text color="gray">Use left/right arrows or 1-6 to switch tabs. Press q to exit.</Text>
       </Box>
     </Box>
   );

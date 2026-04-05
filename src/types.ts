@@ -3,28 +3,71 @@ import {z} from 'zod';
 export const APP_NAME = 'peek';
 export const DEFAULT_MODEL = 'gemini-3-flash-preview';
 export const API_KEY_VALIDATION_MODEL = DEFAULT_MODEL;
-export const REPORT_SCHEMA_VERSION = 1;
-export const PROMPT_VERSION = '2026-03-09-v1';
+export const REPORT_SCHEMA_VERSION = 2;
+export const PROMPT_VERSION = '2026-04-05-v2';
 export const INDEX_VERSION = 1;
+export const GENERATION_INDEX_VERSION = 1;
 
 export const webModeSchema = z.enum(['enabled', 'disabled']);
 export type WebMode = z.infer<typeof webModeSchema>;
 
-export const fileDescriptorSchema = z.object({
+export const sourceKindSchema = z.enum(['local', 'remote']);
+export type SourceKind = z.infer<typeof sourceKindSchema>;
+
+export const remoteProviderSchema = z.enum(['instagram', 'youtube']);
+export type RemoteProvider = z.infer<typeof remoteProviderSchema>;
+
+export const mediaKindSchema = z.enum(['image', 'video']);
+export type MediaKind = z.infer<typeof mediaKindSchema>;
+
+export const generationKindSchema = z.enum(['image', 'video']);
+export type GenerationKind = z.infer<typeof generationKindSchema>;
+
+export const generationModeSchema = z.enum([
+  'prompt',
+  'edit',
+  'image-to-video',
+  'interpolation',
+  'reference',
+  'extension',
+]);
+export type GenerationMode = z.infer<typeof generationModeSchema>;
+
+export const sourceDescriptorSchema = z.object({
+  kind: sourceKindSchema,
+  originalInput: z.string(),
+  displayLabel: z.string(),
+  title: z.string().optional(),
+  provider: remoteProviderSchema.optional(),
+  canonicalUrl: z.string().optional(),
+});
+export type SourceDescriptor = z.infer<typeof sourceDescriptorSchema>;
+
+export const assetDescriptorSchema = z.object({
+  index: z.number().int().nonnegative(),
+  kind: mediaKindSchema,
   path: z.string(),
   hash: z.string(),
   sizeBytes: z.number().int().nonnegative(),
   mimeType: z.string(),
   modifiedTime: z.string(),
 });
-export type FileDescriptor = z.infer<typeof fileDescriptorSchema>;
+export type AssetDescriptor = z.infer<typeof assetDescriptorSchema>;
 
-export const chapterSchema = z.object({
-  start: z.string(),
+export const segmentSchema = z.object({
+  assetIndex: z.number().int().nonnegative(),
+  start: z.string().optional(),
   end: z.string().optional(),
   title: z.string(),
   description: z.string(),
 });
+export type Segment = z.infer<typeof segmentSchema>;
+
+export const assetSummarySchema = z.object({
+  assetIndex: z.number().int().nonnegative(),
+  summary: z.string(),
+});
+export type AssetSummary = z.infer<typeof assetSummarySchema>;
 
 export const personSchema = z.object({
   name: z.string(),
@@ -36,13 +79,14 @@ export const analysisPayloadSchema = z.object({
   headline: z.string(),
   summary: z.string(),
   detailedOverview: z.string(),
-  chapters: z.array(chapterSchema).min(1),
+  assetSummaries: z.array(assetSummarySchema).min(1),
+  segments: z.array(segmentSchema).min(1),
   people: z.array(personSchema),
   locations: z.array(z.string()),
   objects: z.array(z.string()),
   brands: z.array(z.string()),
   onScreenText: z.array(z.string()),
-  audioSummary: z.string(),
+  audioSummary: z.string().optional(),
   notableQuotes: z.array(z.string()),
   notableMoments: z.array(z.string()),
   themes: z.array(z.string()),
@@ -66,7 +110,8 @@ export const canonicalReportSchema = z.object({
   schemaVersion: z.number().int(),
   promptVersion: z.string(),
   webMode: webModeSchema,
-  file: fileDescriptorSchema,
+  source: sourceDescriptorSchema,
+  assets: z.array(assetDescriptorSchema).min(1),
   analysis: analysisPayloadSchema,
   sources: z.array(sourceSchema),
   searchQueries: z.array(z.string()),
@@ -80,10 +125,15 @@ export interface UploadedFileReference {
   expirationTime?: string;
 }
 
+export interface UploadedAssetReference {
+  assetHash: string;
+  uploadedFile: UploadedFileReference;
+}
+
 export interface CacheIndexEntry {
   cacheKey: string;
-  fileHash: string;
-  filePath: string;
+  sourceHash: string;
+  sourceInput: string;
   reportPath: string;
   textPath: string;
   model: string;
@@ -92,7 +142,7 @@ export interface CacheIndexEntry {
   promptVersion: string;
   createdAt: string;
   updatedAt: string;
-  uploadedFile?: UploadedFileReference;
+  uploadedAssets?: UploadedAssetReference[];
 }
 
 export interface CacheIndexFile {
@@ -100,13 +150,21 @@ export interface CacheIndexFile {
   entries: CacheIndexEntry[];
 }
 
-export interface ResolvedInputFile {
+export interface ResolvedAsset {
+  index: number;
+  kind: MediaKind;
   absolutePath: string;
   displayPath: string;
   sizeBytes: number;
   modifiedTime: string;
   mimeType: string;
   hash: string;
+}
+
+export interface ResolvedInputBundle {
+  source: SourceDescriptor;
+  assets: ResolvedAsset[];
+  sourceHash: string;
 }
 
 export interface AnalyzeOptions {
@@ -117,7 +175,7 @@ export interface AnalyzeOptions {
 
 export interface AnalyzeResult {
   report: CanonicalReport;
-  uploadedFile?: UploadedFileReference;
+  uploadedAssets?: UploadedAssetReference[];
 }
 
 export interface AnswerResult {
@@ -131,8 +189,65 @@ export interface AppPaths {
   dataDir: string;
   cacheDir: string;
   reportsDir: string;
+  downloadsDir: string;
+  generationRecordsDir: string;
   configFile: string;
   indexFile: string;
+  generationIndexFile: string;
+}
+
+export interface GeneratedOutputAsset {
+  index: number;
+  kind: MediaKind;
+  path: string;
+  hash: string;
+  sizeBytes: number;
+  mimeType: string;
+  createdAt: string;
+}
+
+export interface GenerationInputSource {
+  source: SourceDescriptor;
+  assets: Array<{
+    index: number;
+    kind: MediaKind;
+    path: string;
+    hash: string;
+    sizeBytes: number;
+    mimeType: string;
+    modifiedTime: string;
+  }>;
+}
+
+export interface GenerationRecord {
+  id: string;
+  kind: GenerationKind;
+  mode: GenerationMode;
+  createdAt: string;
+  model: string;
+  modelAlias?: string;
+  prompt: string;
+  inputs: GenerationInputSource[];
+  outputs: GeneratedOutputAsset[];
+  options: Record<string, boolean | number | string | string[] | undefined>;
+  operationName?: string;
+}
+
+export interface GenerationIndexEntry {
+  id: string;
+  kind: GenerationKind;
+  mode: GenerationMode;
+  createdAt: string;
+  model: string;
+  modelAlias?: string;
+  prompt: string;
+  recordPath: string;
+  outputPaths: string[];
+}
+
+export interface GenerationIndexFile {
+  version: number;
+  entries: GenerationIndexEntry[];
 }
 
 export const analysisJsonSchema = {
@@ -142,13 +257,13 @@ export const analysisJsonSchema = {
     'headline',
     'summary',
     'detailedOverview',
-    'chapters',
+    'assetSummaries',
+    'segments',
     'people',
     'locations',
     'objects',
     'brands',
     'onScreenText',
-    'audioSummary',
     'notableQuotes',
     'notableMoments',
     'themes',
@@ -160,13 +275,26 @@ export const analysisJsonSchema = {
     headline: {type: 'string'},
     summary: {type: 'string'},
     detailedOverview: {type: 'string'},
-    chapters: {
+    assetSummaries: {
       type: 'array',
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['start', 'title', 'description'],
+        required: ['assetIndex', 'summary'],
         properties: {
+          assetIndex: {type: 'integer'},
+          summary: {type: 'string'},
+        },
+      },
+    },
+    segments: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['assetIndex', 'title', 'description'],
+        properties: {
+          assetIndex: {type: 'integer'},
           start: {type: 'string'},
           end: {type: 'string'},
           title: {type: 'string'},

@@ -1,7 +1,7 @@
 {
   "name": "peek",
-  "version": "0.1.3",
-  "description": "Deep video analysis CLI powered by Gemini models.",
+  "version": "0.2.0",
+  "description": "Media analysis CLI for local files, Instagram, and YouTube.",
   "type": "module",
   "bin": {
     "peek": "dist/cli.js"
@@ -15,6 +15,7 @@
   "packageManager": "pnpm@9.15.1",
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "pnpm build && node --test test/*.test.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "pack:release": "mkdir -p .release && pnpm build && npm pack --pack-destination .release",
     "start": "node dist/cli.js"
@@ -22,7 +23,10 @@
   "keywords": [
     "cli",
     "gemini",
+    "image",
     "video",
+    "instagram",
+    "youtube",
     "tui",
     "typescript"
   ],

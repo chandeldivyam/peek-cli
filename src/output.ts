@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-import type {AnswerResult, CanonicalReport} from './types.js';
+import type {AnswerResult, CanonicalReport, GenerationRecord} from './types.js';
 
 function formatList(items: string[], bullet = '-'): string {
   if (items.length === 0) {
@@ -17,11 +17,24 @@ function formatPairs(items: Array<{name: string; value: string}>): string {
 }
 
 export function renderReport(report: CanonicalReport): string {
-  const fileName = path.basename(report.file.path);
-  const chapters = report.analysis.chapters
-    .map((chapter) => {
-      const range = chapter.end ? `${chapter.start} -> ${chapter.end}` : chapter.start;
-      return `- ${range} | ${chapter.title}\n  ${chapter.description}`;
+  const assetLabel =
+    report.assets.length === 1
+      ? path.basename(report.assets[0]?.path ?? report.source.displayLabel)
+      : `${report.assets.length} assets`;
+  const assetList = report.assets
+    .map((asset) => `- [${asset.index + 1}] ${asset.kind} | ${path.basename(asset.path)}`)
+    .join('\n');
+  const assetSummaries = report.analysis.assetSummaries
+    .map((summary) => `- [${summary.assetIndex + 1}] ${summary.summary}`)
+    .join('\n');
+  const segments = report.analysis.segments
+    .map((segment) => {
+      const timeRange = segment.start
+        ? segment.end
+          ? `${segment.start} -> ${segment.end}`
+          : segment.start
+        : 'No timestamp';
+      return `- [${segment.assetIndex + 1}] ${timeRange} | ${segment.title}\n  ${segment.description}`;
     })
     .join('\n');
 
@@ -34,7 +47,8 @@ export function renderReport(report: CanonicalReport): string {
 
   const sections = [
     `# ${report.analysis.headline}`,
-    `File: ${fileName}`,
+    `Source: ${report.source.displayLabel}`,
+    `Assets: ${assetLabel}`,
     `Model: ${report.model}`,
     `Generated: ${report.generatedAt}`,
     '',
@@ -44,8 +58,14 @@ export function renderReport(report: CanonicalReport): string {
     '## Deep Overview',
     report.analysis.detailedOverview,
     '',
-    '## Timeline',
-    chapters || '- No chapter breakdown available.',
+    '## Assets',
+    assetList || '- No assets found.',
+    '',
+    '## Asset Summaries',
+    assetSummaries || '- No asset summaries available.',
+    '',
+    '## Segments',
+    segments || '- No segment breakdown available.',
     '',
     '## People',
     formatPairs(people),
@@ -61,9 +81,9 @@ export function renderReport(report: CanonicalReport): string {
     '',
     '## On-Screen Text',
     formatList(report.analysis.onScreenText),
-    '',
-    '## Audio',
-    report.analysis.audioSummary,
+    ...(report.analysis.audioSummary
+      ? ['', '## Audio', report.analysis.audioSummary]
+      : []),
     '',
     '## Notable Quotes',
     formatList(report.analysis.notableQuotes),
@@ -99,4 +119,39 @@ export function renderAnswer(result: AnswerResult): string {
     lines.push(...result.sources.map((source) => `- ${source.title}: ${source.url}`));
   }
   return lines.join('\n');
+}
+
+export function renderGenerationRecord(record: GenerationRecord): string {
+  const outputLines = record.outputs.map(
+    (output) => `- [${output.index + 1}] ${output.mimeType} | ${output.path}`,
+  );
+  const inputLines = record.inputs.flatMap((input) =>
+    input.assets.map(
+      (asset) =>
+        `- ${input.source.displayLabel} -> [${asset.index + 1}] ${asset.kind} | ${path.basename(asset.path)}`,
+    ),
+  );
+
+  const sections = [
+    `# Generated ${record.kind}`,
+    `Model: ${record.modelAlias ? `${record.modelAlias} (${record.model})` : record.model}`,
+    `Mode: ${record.mode}`,
+    `Created: ${record.createdAt}`,
+    `ID: ${record.id}`,
+    '',
+    '## Prompt',
+    record.prompt,
+    '',
+    '## Inputs',
+    inputLines.length > 0 ? inputLines.join('\n') : '- None',
+    '',
+    '## Outputs',
+    outputLines.join('\n'),
+  ];
+
+  if (record.operationName) {
+    sections.push('', '## Operation', record.operationName);
+  }
+
+  return sections.join('\n');
 }

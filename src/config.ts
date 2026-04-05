@@ -18,8 +18,11 @@ export function getAppPaths(): AppPaths {
     dataDir: paths.data,
     cacheDir: paths.cache,
     reportsDir: path.join(paths.cache, 'reports'),
+    downloadsDir: path.join(paths.cache, 'downloads'),
+    generationRecordsDir: path.join(paths.cache, 'generations'),
     configFile: path.join(paths.config, 'config.json'),
     indexFile: path.join(paths.cache, 'index.json'),
+    generationIndexFile: path.join(paths.cache, 'generation-index.json'),
   };
 }
 
@@ -29,6 +32,8 @@ export async function ensureAppPaths(paths: AppPaths): Promise<void> {
     ensureDir(paths.dataDir),
     ensureDir(paths.cacheDir),
     ensureDir(paths.reportsDir),
+    ensureDir(paths.downloadsDir),
+    ensureDir(paths.generationRecordsDir),
   ]);
 }
 
