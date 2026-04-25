@@ -20,6 +20,9 @@ export type RemoteProvider = z.infer<typeof remoteProviderSchema>;
 export const mediaKindSchema = z.enum(['image', 'video']);
 export type MediaKind = z.infer<typeof mediaKindSchema>;
 
+export const generationProviderSchema = z.enum(['gemini', 'xai']);
+export type GenerationProviderId = z.infer<typeof generationProviderSchema>;
+
 export const generationKindSchema = z.enum(['image', 'video']);
 export type GenerationKind = z.infer<typeof generationKindSchema>;
 
@@ -221,6 +224,7 @@ export interface GenerationInputSource {
 
 export interface GenerationRecord {
   id: string;
+  provider: GenerationProviderId;
   kind: GenerationKind;
   mode: GenerationMode;
   createdAt: string;
@@ -235,6 +239,7 @@ export interface GenerationRecord {
 
 export interface GenerationIndexEntry {
   id: string;
+  provider: GenerationProviderId;
   kind: GenerationKind;
   mode: GenerationMode;
   createdAt: string;

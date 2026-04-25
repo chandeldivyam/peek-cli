@@ -29,6 +29,7 @@ export class GenerationStore {
     const index = await this.readIndex();
     const nextEntry: GenerationIndexEntry = {
       id: record.id,
+      provider: record.provider,
       kind: record.kind,
       mode: record.mode,
       createdAt: record.createdAt,

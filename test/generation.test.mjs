@@ -12,6 +12,7 @@ import {
   resolveVideoModelChoice,
 } from '../dist/generation.js';
 import {GenerationStore} from '../dist/generation-store.js';
+import {getGenerationProvider} from '../dist/providers/index.js';
 
 async function withTempDir(run) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'peek-gen-test-'));
@@ -53,10 +54,20 @@ test('resolveImageModelChoice maps aliases to Nano Banana models', () => {
   assert.equal(resolveImageModelChoice('pro').model, 'gemini-3-pro-image-preview');
 });
 
+test('resolveImageModelChoice maps xAI image aliases', () => {
+  assert.equal(resolveImageModelChoice('xai', 'imagine').model, 'grok-imagine-image');
+  assert.equal(resolveImageModelChoice('xai').model, 'grok-imagine-image');
+});
+
 test('resolveVideoModelChoice maps aliases to Veo models', () => {
   assert.equal(resolveVideoModelChoice('fast').model, 'veo-3.1-fast-generate-preview');
   assert.equal(resolveVideoModelChoice('quality').model, 'veo-3.1-generate-preview');
   assert.equal(resolveVideoModelChoice('lite').model, 'veo-3.1-lite-generate-preview');
+});
+
+test('resolveVideoModelChoice maps xAI video aliases', () => {
+  assert.equal(resolveVideoModelChoice('xai', 'imagine').model, 'grok-imagine-video');
+  assert.equal(resolveVideoModelChoice('xai').model, 'grok-imagine-video');
 });
 
 test('planOutputAssets uses a direct file path for a single explicit output file', () => {
@@ -118,15 +129,32 @@ test('buildImageCreateRequest rejects non-image generation inputs', () => {
 
 test('buildVideoCreateRequest rejects unsupported lite reference mode', () => {
   assert.throws(
-    () =>
-      buildVideoCreateRequest({
+    () => {
+      const request = buildVideoCreateRequest({
         model: 'lite',
         prompt: 'animate this',
         referenceSources: [
           createSource('/tmp/ref.png', [createAsset('image', '/tmp/ref.png', 'image/png')]),
         ],
-      }),
+      });
+      getGenerationProvider('gemini').validateVideoRequest(request);
+    },
     /does not support reference images/,
+  );
+});
+
+test('xAI provider validates its video limits', () => {
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'xai',
+        prompt: 'animate this',
+        referenceSources: [],
+        resolution: '1080p',
+      });
+      getGenerationProvider('xai').validateVideoRequest(request);
+    },
+    /480p or 720p/,
   );
 });
 
@@ -161,6 +189,7 @@ test('GenerationStore persists and reloads generation records', async () => {
 
     await store.store({
       id: 'gen-1',
+      provider: 'gemini',
       kind: 'image',
       mode: 'prompt',
       createdAt: '2026-04-05T00:00:00.000Z',
@@ -183,6 +212,7 @@ test('GenerationStore persists and reloads generation records', async () => {
 
     const loaded = await store.get('gen-1');
     assert.equal(loaded?.prompt, 'red square');
+    assert.equal(loaded?.provider, 'gemini');
     assert.equal(loaded?.outputs[0]?.path, '/tmp/output.jpg');
   });
 });

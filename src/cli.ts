@@ -15,7 +15,7 @@ import {
 } from '@clack/prompts';
 import {Command, Option} from 'commander';
 
-import {ensureApiKey} from './auth.js';
+import {ensureApiKey, ensureProviderApiKey} from './auth.js';
 import {CacheStore, buildCacheKey} from './cache.js';
 import {ConfigStore, ensureAppPaths, getAppPaths} from './config.js';
 import {
@@ -30,12 +30,18 @@ import {GeminiService} from './gemini.js';
 import {resolveInputBundle} from './input.js';
 import {computeFileHash} from './fs-utils.js';
 import {renderAnswer, renderGenerationRecord, renderReport} from './output.js';
+import {
+  getGenerationProvider,
+  parseGenerationProvider,
+  renderAgentHelp,
+} from './providers/index.js';
 import {isSupportedRemoteUrl} from './remote.js';
 import {installLatestRelease} from './self-update.js';
 import {DEFAULT_MODEL, canonicalReportSchema} from './types.js';
 import type {
   AnalyzeOptions,
   CanonicalReport,
+  GenerationProviderId,
   GenerationInputSource,
   GenerationRecord,
   ResolvedInputBundle,
@@ -367,20 +373,24 @@ async function askQuestion(rawInput: string, question: string, web: boolean): Pr
 }
 
 async function createImage(prompt: string, options: {
+  provider?: string;
   model?: string;
   input: string[];
   count?: number;
   aspectRatio?: string;
-  size?: '1K' | '2K' | '4K';
+  size?: string;
   personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
   output?: string;
   json?: boolean;
 }): Promise<void> {
   await ensureAppPaths(paths);
-  const apiKey = await ensureApiKey({configStore});
-  const gemini = new GeminiService(apiKey);
+  const providerId = parseGenerationProvider(options.provider);
+  const provider = getGenerationProvider(providerId);
+  const apiKey = await ensureProviderApiKey({configStore, provider: providerId});
+  const client = provider.createClient(apiKey);
   const inputSources = await Promise.all((options.input ?? []).map((input) => resolveGenerationSource(input)));
   const request = buildImageCreateRequest({
+    provider: providerId,
     prompt,
     inputSources,
     ...(options.model ? {model: options.model} : {}),
@@ -391,20 +401,15 @@ async function createImage(prompt: string, options: {
     ...(options.output ? {outputPath: options.output} : {}),
     ...(typeof options.json === 'boolean' ? {json: options.json} : {}),
   });
+  provider.validateImageRequest(request);
 
   intro('peek create image');
   const progress = spinner();
-  progress.start(`Generating image with ${request.modelChoice.model}`);
+  progress.start(`Generating image with ${provider.label} ${request.modelChoice.model}`);
 
   try {
-    const generatedOutputs = await gemini.generateImages({
-      prompt: request.prompt,
-      model: request.modelChoice.model,
-      count: request.count,
-      ...(request.aspectRatio ? {aspectRatio: request.aspectRatio} : {}),
-      ...(request.imageSize ? {imageSize: request.imageSize} : {}),
-      ...(request.personGeneration ? {personGeneration: request.personGeneration} : {}),
-      inputAssets: request.inputSources.flatMap((inputSource) => inputSource.assets),
+    const generatedOutputs = await client.generateImages({
+      request,
       onProgress(message) {
         progress.message(message);
       },
@@ -431,6 +436,7 @@ async function createImage(prompt: string, options: {
     const createdAt = new Date().toISOString();
     const record: GenerationRecord = {
       id: buildGenerationId(),
+      provider: request.provider,
       kind: 'image',
       mode: inputSources.length > 0 ? 'edit' : 'prompt',
       createdAt,
@@ -449,6 +455,7 @@ async function createImage(prompt: string, options: {
         ),
       }),
       options: {
+        provider: request.provider,
         count: request.count,
         ...(request.aspectRatio ? {aspectRatio: request.aspectRatio} : {}),
         ...(request.imageSize ? {imageSize: request.imageSize} : {}),
@@ -473,13 +480,14 @@ async function createImage(prompt: string, options: {
 }
 
 async function createVideo(prompt: string, options: {
+  provider?: string;
   model?: string;
   image?: string;
   lastFrame?: string;
   reference: string[];
   video?: string;
-  aspectRatio?: '16:9' | '9:16';
-  resolution?: '720p' | '1080p' | '4k';
+  aspectRatio?: string;
+  resolution?: string;
   duration?: number;
   personGeneration?: 'allow_all' | 'allow_adult';
   negativePrompt?: string;
@@ -488,8 +496,10 @@ async function createVideo(prompt: string, options: {
   json?: boolean;
 }): Promise<void> {
   await ensureAppPaths(paths);
-  const apiKey = await ensureApiKey({configStore});
-  const gemini = new GeminiService(apiKey);
+  const providerId = parseGenerationProvider(options.provider);
+  const provider = getGenerationProvider(providerId);
+  const apiKey = await ensureProviderApiKey({configStore, provider: providerId});
+  const client = provider.createClient(apiKey);
 
   const imageSource = options.image ? await resolveGenerationSource(options.image) : undefined;
   const lastFrameSource = options.lastFrame
@@ -501,6 +511,7 @@ async function createVideo(prompt: string, options: {
   const videoSource = options.video ? await resolveGenerationSource(options.video) : undefined;
 
   const request = buildVideoCreateRequest({
+    provider: providerId,
     prompt,
     ...(imageSource ? {imageSource} : {}),
     ...(lastFrameSource ? {lastFrameSource} : {}),
@@ -518,10 +529,11 @@ async function createVideo(prompt: string, options: {
     ...(options.output ? {outputPath: options.output} : {}),
     ...(typeof options.json === 'boolean' ? {json: options.json} : {}),
   });
+  provider.validateVideoRequest(request);
 
   intro('peek create video');
   const progress = spinner();
-  progress.start(`Generating video with ${request.modelChoice.model}`);
+  progress.start(`Generating video with ${provider.label} ${request.modelChoice.model}`);
 
   try {
     const plannedOutputs = planOutputAssets({
@@ -535,19 +547,8 @@ async function createVideo(prompt: string, options: {
     const plannedOutput = plannedOutputs[0]!;
     await mkdir(path.dirname(plannedOutput.path), {recursive: true});
 
-    const result = await gemini.generateVideo({
-      prompt: request.prompt,
-      model: request.modelChoice.model,
-      aspectRatio: request.aspectRatio,
-      durationSeconds: request.durationSeconds,
-      resolution: request.resolution,
-      personGeneration: request.personGeneration,
-      ...(request.negativePrompt ? {negativePrompt: request.negativePrompt} : {}),
-      ...(typeof request.seed === 'number' ? {seed: request.seed} : {}),
-      ...(request.image ? {image: request.image} : {}),
-      ...(request.lastFrame ? {lastFrame: request.lastFrame} : {}),
-      references: request.references,
-      ...(request.video ? {video: request.video} : {}),
+    const result = await client.generateVideo({
+      request,
       outputPath: plannedOutput.path,
       onProgress(message) {
         progress.message(message);
@@ -557,6 +558,7 @@ async function createVideo(prompt: string, options: {
     const createdAt = new Date().toISOString();
     const record: GenerationRecord = {
       id: buildGenerationId(),
+      provider: request.provider,
       kind: 'video',
       mode: request.mode,
       createdAt,
@@ -575,6 +577,7 @@ async function createVideo(prompt: string, options: {
         ]),
       }),
       options: {
+        provider: request.provider,
         aspectRatio: request.aspectRatio,
         durationSeconds: request.durationSeconds,
         resolution: request.resolution,
@@ -604,9 +607,9 @@ async function createVideo(prompt: string, options: {
   }
 }
 
-async function runAuth(): Promise<void> {
+async function runAuth(provider: GenerationProviderId): Promise<void> {
   await ensureAppPaths(paths);
-  await ensureApiKey({configStore, forcePrompt: true});
+  await ensureProviderApiKey({configStore, provider, forcePrompt: true});
 }
 
 async function runInstall(version?: string): Promise<void> {
@@ -676,8 +679,14 @@ async function main(): Promise<void> {
     .option('--json', 'Print JSON instead of rendered text', false)
     .option('--web', 'Enable grounded web search during analysis', true)
     .option('--no-web', 'Disable grounded web search during analysis')
+    .option('--agent-help', 'Print agent-oriented usage guidance', false)
     .option('-o, --output <path>', 'Write the final output to a file')
-    .action(async (sources: string[], options: RuntimeOptions, command: Command) => {
+    .action(async (sources: string[], options: RuntimeOptions & {agentHelp?: boolean}, command: Command) => {
+      if (options.agentHelp) {
+        process.stdout.write(`${renderAgentHelp('root')}\n`);
+        return;
+      }
+
       if (!sources || sources.length === 0) {
         program.help();
       }
@@ -713,9 +722,10 @@ async function main(): Promise<void> {
 
   program
     .command('auth')
-    .description('Enter and verify your GEMINI_API_KEY.')
-    .action(async () => {
-      await runAuth();
+    .description('Enter and verify an API key.')
+    .option('--provider <provider>', 'Provider to authenticate: gemini or xai', 'gemini')
+    .action(async (options: {provider?: string}) => {
+      await runAuth(parseGenerationProvider(options.provider));
     });
 
   program
@@ -726,50 +736,79 @@ async function main(): Promise<void> {
       await runInstall(options.version);
     });
 
-  const createCommand = program.command('create').description('Generate images or videos with Google models.');
+  const createCommand = program
+    .command('create')
+    .description('Generate images or videos with provider-backed models.')
+    .option('--agent-help', 'Print agent-oriented generation guidance', false)
+    .action((options: {agentHelp?: boolean}) => {
+      if (options.agentHelp) {
+        process.stdout.write(`${renderAgentHelp('create')}\n`);
+        return;
+      }
+
+      createCommand.help();
+    });
+
   createCommand
     .command('image')
-    .description('Generate one or more images with Nano Banana.')
-    .argument('<prompt>', 'Prompt to generate from')
-    .addOption(new Option('--model <model>', 'Image model alias or raw model id').default('flash'))
+    .description('Generate one or more images.')
+    .argument('[prompt]', 'Prompt to generate from')
+    .option('--agent-help', 'Print agent-oriented image generation guidance', false)
+    .option('--provider <provider>', 'Generation provider: gemini or xai', 'gemini')
+    .option('--model <model>', 'Image model alias or raw model id')
     .option('--input <source>', 'Reference image input (repeatable)', collectValues, [])
     .option('--count <count>', 'Number of images to generate', (value) => Number.parseInt(value, 10), 1)
     .option('--aspect-ratio <ratio>', 'Image aspect ratio, for example 1:1 or 16:9')
-    .option('--size <size>', 'Image size: 1K, 2K, or 4K')
+    .option('--size <size>', 'Image size/resolution, for example 1K, 2K, 4K, 1k, or 2k')
     .option('--person-generation <mode>', 'allow_all, allow_adult, or allow_none')
     .option('--json', 'Print generation metadata as JSON', false)
     .option('-o, --output <path>', 'Output file or directory for generated assets')
     .action(async function (
       this: Command,
-      prompt: string,
+      prompt: string | undefined,
     ) {
+      const resolved = resolveSubcommandOptions(this) as {
+        agentHelp?: boolean;
+        provider?: string;
+        model?: string;
+        input: string[];
+        count?: number;
+        aspectRatio?: string;
+        size?: string;
+        personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
+        output?: string;
+        json?: boolean;
+      };
+
+      if (resolved.agentHelp) {
+        process.stdout.write(`${renderAgentHelp('image')}\n`);
+        return;
+      }
+
+      if (!prompt) {
+        this.help();
+      }
+
       await createImage(
         prompt,
-        resolveSubcommandOptions(this) as {
-          model?: string;
-          input: string[];
-          count?: number;
-          aspectRatio?: string;
-          size?: '1K' | '2K' | '4K';
-          personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
-          output?: string;
-          json?: boolean;
-        },
+        resolved,
       );
     });
 
   createCommand
     .command('video')
-    .description('Generate a video with Veo 3.1.')
-    .argument('<prompt>', 'Prompt to generate from')
-    .addOption(new Option('--model <model>', 'Video model alias or raw model id').default('fast'))
+    .description('Generate a video.')
+    .argument('[prompt]', 'Prompt to generate from')
+    .option('--agent-help', 'Print agent-oriented video generation guidance', false)
+    .option('--provider <provider>', 'Generation provider: gemini or xai', 'gemini')
+    .option('--model <model>', 'Video model alias or raw model id')
     .option('--image <source>', 'Single input image for image-to-video')
     .option('--last-frame <source>', 'Single final image for interpolation')
-    .option('--reference <source>', 'Reference image input (repeatable, max 3)', collectValues, [])
+    .option('--reference <source>', 'Reference image input (repeatable)', collectValues, [])
     .option('--video <source>', 'Single input video for extension')
-    .option('--aspect-ratio <ratio>', '16:9 or 9:16', '16:9')
-    .option('--resolution <resolution>', '720p, 1080p, or 4k', '720p')
-    .option('--duration <seconds>', '4, 6, or 8 seconds', (value) => Number.parseInt(value, 10), 4)
+    .option('--aspect-ratio <ratio>', 'Video aspect ratio', '16:9')
+    .option('--resolution <resolution>', 'Video resolution, for example 480p, 720p, 1080p, or 4k', '720p')
+    .option('--duration <seconds>', 'Video duration in seconds', (value) => Number.parseInt(value, 10), 4)
     .option('--person-generation <mode>', 'allow_all or allow_adult')
     .option('--negative-prompt <text>', 'Tell Veo what to avoid')
     .option('--seed <seed>', 'Random seed', (value) => Number.parseInt(value, 10))
@@ -777,25 +816,38 @@ async function main(): Promise<void> {
     .option('-o, --output <path>', 'Output file or directory for generated assets')
     .action(async function (
       this: Command,
-      prompt: string,
+      prompt: string | undefined,
     ) {
+      const resolved = resolveSubcommandOptions(this) as {
+        agentHelp?: boolean;
+        provider?: string;
+        model?: string;
+        image?: string;
+        lastFrame?: string;
+        reference: string[];
+        video?: string;
+        aspectRatio?: string;
+        resolution?: string;
+        duration?: number;
+        personGeneration?: 'allow_all' | 'allow_adult';
+        negativePrompt?: string;
+        seed?: number;
+        output?: string;
+        json?: boolean;
+      };
+
+      if (resolved.agentHelp) {
+        process.stdout.write(`${renderAgentHelp('video')}\n`);
+        return;
+      }
+
+      if (!prompt) {
+        this.help();
+      }
+
       await createVideo(
         prompt,
-        resolveSubcommandOptions(this) as {
-          model?: string;
-          image?: string;
-          lastFrame?: string;
-          reference: string[];
-          video?: string;
-          aspectRatio?: '16:9' | '9:16';
-          resolution?: '720p' | '1080p' | '4k';
-          duration?: number;
-          personGeneration?: 'allow_all' | 'allow_adult';
-          negativePrompt?: string;
-          seed?: number;
-          output?: string;
-          json?: boolean;
-        },
+        resolved,
       );
     });
 

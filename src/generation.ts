@@ -6,6 +6,7 @@ import type {
   GeneratedOutputAsset,
   GenerationKind,
   GenerationMode,
+  GenerationProviderId,
   MediaKind,
   ResolvedAsset,
   SourceDescriptor,
@@ -17,7 +18,7 @@ export interface ModelChoice {
 }
 
 interface ImageModelProfile extends ModelChoice {
-  defaultImageSize?: '1K' | '2K' | '4K';
+  defaultImageSize?: string;
 }
 
 interface VideoModelProfile extends ModelChoice {
@@ -29,27 +30,14 @@ interface VideoModelProfile extends ModelChoice {
 }
 
 const imageModelAliases = new Map<string, ImageModelProfile>([
-  [
-    'flash',
-    {
-      alias: 'flash',
-      model: 'gemini-3.1-flash-image-preview',
-      defaultImageSize: '1K',
-    },
-  ],
-  [
-    'pro',
-    {
-      alias: 'pro',
-      model: 'gemini-3-pro-image-preview',
-      defaultImageSize: '2K',
-    },
-  ],
+  ['gemini:flash', {alias: 'flash', model: 'gemini-3.1-flash-image-preview', defaultImageSize: '1K'}],
+  ['gemini:pro', {alias: 'pro', model: 'gemini-3-pro-image-preview', defaultImageSize: '2K'}],
+  ['xai:imagine', {alias: 'imagine', model: 'grok-imagine-image'}],
 ]);
 
 const videoModelAliases = new Map<string, VideoModelProfile>([
   [
-    'fast',
+    'gemini:fast',
     {
       alias: 'fast',
       model: 'veo-3.1-fast-generate-preview',
@@ -61,7 +49,7 @@ const videoModelAliases = new Map<string, VideoModelProfile>([
     },
   ],
   [
-    'quality',
+    'gemini:quality',
     {
       alias: 'quality',
       model: 'veo-3.1-generate-preview',
@@ -73,7 +61,7 @@ const videoModelAliases = new Map<string, VideoModelProfile>([
     },
   ],
   [
-    'lite',
+    'gemini:lite',
     {
       alias: 'lite',
       model: 'veo-3.1-lite-generate-preview',
@@ -81,6 +69,18 @@ const videoModelAliases = new Map<string, VideoModelProfile>([
       supportsExtension: false,
       supports4k: false,
       supports1080p: true,
+      supportsPortrait1080p: false,
+    },
+  ],
+  [
+    'xai:imagine',
+    {
+      alias: 'imagine',
+      model: 'grok-imagine-video',
+      supportsReferenceImages: true,
+      supportsExtension: true,
+      supports4k: false,
+      supports1080p: false,
       supportsPortrait1080p: false,
     },
   ],
@@ -94,11 +94,12 @@ export interface ResolvedGenerationSource {
 
 export interface ImageCreateRequest {
   kind: 'image';
+  provider: GenerationProviderId;
   modelChoice: ImageModelProfile;
   prompt: string;
   count: number;
   aspectRatio?: string;
-  imageSize?: '1K' | '2K' | '4K';
+  imageSize?: string;
   personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
   inputSources: ResolvedGenerationSource[];
   outputPath?: string;
@@ -107,13 +108,14 @@ export interface ImageCreateRequest {
 
 export interface VideoCreateRequest {
   kind: 'video';
+  provider: GenerationProviderId;
   modelChoice: VideoModelProfile;
   prompt: string;
   mode: GenerationMode;
-  aspectRatio: '16:9' | '9:16';
-  durationSeconds: 4 | 6 | 8;
-  resolution: '720p' | '1080p' | '4k';
-  personGeneration: 'allow_all' | 'allow_adult';
+  aspectRatio: string;
+  durationSeconds: number;
+  resolution: string;
+  personGeneration?: 'allow_all' | 'allow_adult';
   negativePrompt?: string;
   seed?: number;
   image?: ResolvedAsset;
@@ -132,24 +134,40 @@ export interface PlannedOutputAsset {
   mimeType: string;
 }
 
-export function resolveImageModelChoice(input?: string): ImageModelProfile {
-  if (!input?.trim()) {
-    return imageModelAliases.get('flash')!;
+export function resolveImageModelChoice(
+  providerOrInput: GenerationProviderId | string = 'gemini',
+  input?: string,
+): ImageModelProfile {
+  const provider: GenerationProviderId =
+    providerOrInput === 'gemini' || providerOrInput === 'xai' ? providerOrInput : 'gemini';
+  const modelInput =
+    providerOrInput === 'gemini' || providerOrInput === 'xai' ? input : providerOrInput;
+
+  if (!modelInput?.trim()) {
+    return imageModelAliases.get(`${provider}:imagine`) ?? imageModelAliases.get(`${provider}:flash`)!;
   }
 
-  const normalized = input.trim().toLowerCase();
-  return imageModelAliases.get(normalized) ?? {model: input.trim().replace(/^models\//, '')};
+  const normalized = modelInput.trim().toLowerCase();
+  return imageModelAliases.get(`${provider}:${normalized}`) ?? {model: modelInput.trim().replace(/^models\//, '')};
 }
 
-export function resolveVideoModelChoice(input?: string): VideoModelProfile {
-  if (!input?.trim()) {
-    return videoModelAliases.get('fast')!;
+export function resolveVideoModelChoice(
+  providerOrInput: GenerationProviderId | string = 'gemini',
+  input?: string,
+): VideoModelProfile {
+  const provider: GenerationProviderId =
+    providerOrInput === 'gemini' || providerOrInput === 'xai' ? providerOrInput : 'gemini';
+  const modelInput =
+    providerOrInput === 'gemini' || providerOrInput === 'xai' ? input : providerOrInput;
+
+  if (!modelInput?.trim()) {
+    return videoModelAliases.get(`${provider}:imagine`) ?? videoModelAliases.get(`${provider}:fast`)!;
   }
 
-  const normalized = input.trim().toLowerCase();
+  const normalized = modelInput.trim().toLowerCase();
   return (
-    videoModelAliases.get(normalized) ?? {
-      model: input.trim().replace(/^models\//, ''),
+    videoModelAliases.get(`${provider}:${normalized}`) ?? {
+      model: modelInput.trim().replace(/^models\//, ''),
       supportsReferenceImages: true,
       supportsExtension: true,
       supports4k: true,
@@ -192,26 +210,33 @@ export function ensureSingleAsset(
 }
 
 export function buildImageCreateRequest(params: {
+  provider?: GenerationProviderId;
   model?: string;
   prompt: string;
   count?: number;
   aspectRatio?: string;
-  imageSize?: '1K' | '2K' | '4K';
+  imageSize?: string;
   personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
   inputSources: ResolvedGenerationSource[];
   outputPath?: string;
   json?: boolean;
 }): ImageCreateRequest {
+  const provider = params.provider ?? 'gemini';
   const count = params.count ?? 1;
-  if (!Number.isInteger(count) || count < 1 || count > 8) {
-    throw new Error('Image generation count must be an integer between 1 and 8.');
+  if (!Number.isInteger(count) || count < 1 || count > 10) {
+    throw new Error('Image generation count must be an integer between 1 and 10.');
+  }
+
+  if (!params.prompt.trim()) {
+    throw new Error('A generation prompt is required.');
   }
 
   ensureImageSources(params.inputSources);
-  const modelChoice = resolveImageModelChoice(params.model);
+  const modelChoice = resolveImageModelChoice(provider, params.model);
 
   return {
     kind: 'image',
+    provider,
     modelChoice,
     prompt: params.prompt.trim(),
     count,
@@ -250,21 +275,23 @@ function inferVideoMode(params: {
 }
 
 export function buildVideoCreateRequest(params: {
+  provider?: GenerationProviderId;
   model?: string;
   prompt: string;
   imageSource?: ResolvedGenerationSource;
   lastFrameSource?: ResolvedGenerationSource;
   referenceSources: ResolvedGenerationSource[];
   videoSource?: ResolvedGenerationSource;
-  aspectRatio?: '16:9' | '9:16';
-  durationSeconds?: 4 | 6 | 8;
-  resolution?: '720p' | '1080p' | '4k';
+  aspectRatio?: string;
+  durationSeconds?: number;
+  resolution?: string;
   personGeneration?: 'allow_all' | 'allow_adult';
   negativePrompt?: string;
   seed?: number;
   outputPath?: string;
   json?: boolean;
 }): VideoCreateRequest {
+  const provider = params.provider ?? 'gemini';
   const hasImage = Boolean(params.imageSource);
   const hasLastFrame = Boolean(params.lastFrameSource);
   const hasReferences = params.referenceSources.length > 0;
@@ -283,9 +310,6 @@ export function buildVideoCreateRequest(params: {
   }
 
   const referenceAssets = params.referenceSources.map((source) => ensureSingleAsset(source.rawInput, source, 'image'));
-  if (referenceAssets.length > 3) {
-    throw new Error('Veo supports at most 3 reference images.');
-  }
 
   const image = params.imageSource
     ? ensureSingleAsset(params.imageSource.rawInput, params.imageSource, 'image')
@@ -297,7 +321,7 @@ export function buildVideoCreateRequest(params: {
     ? ensureSingleAsset(params.videoSource.rawInput, params.videoSource, 'video')
     : undefined;
 
-  const modelChoice = resolveVideoModelChoice(params.model);
+  const modelChoice = resolveVideoModelChoice(provider, params.model);
   const mode = inferVideoMode({
     hasImage,
     hasLastFrame,
@@ -307,44 +331,12 @@ export function buildVideoCreateRequest(params: {
   const aspectRatio = params.aspectRatio ?? '16:9';
   const durationSeconds = params.durationSeconds ?? 4;
   const resolution = params.resolution ?? '720p';
-  const personGeneration =
-    params.personGeneration ??
-    (mode === 'prompt' || mode === 'extension' ? 'allow_all' : 'allow_adult');
-
-  if (mode === 'reference' && !modelChoice.supportsReferenceImages) {
-    throw new Error(`Model ${modelChoice.model} does not support reference images.`);
+  if (!Number.isInteger(durationSeconds) || durationSeconds < 1) {
+    throw new Error('Video duration must be a positive integer number of seconds.');
   }
 
-  if (mode === 'extension' && !modelChoice.supportsExtension) {
-    throw new Error(`Model ${modelChoice.model} does not support video extension.`);
-  }
-
-  if (resolution === '4k' && !modelChoice.supports4k) {
-    throw new Error(`Model ${modelChoice.model} does not support 4k output.`);
-  }
-
-  if (resolution === '1080p' && !modelChoice.supports1080p) {
-    throw new Error(`Model ${modelChoice.model} does not support 1080p output.`);
-  }
-
-  if (resolution === '1080p' && aspectRatio === '9:16' && !modelChoice.supportsPortrait1080p) {
-    throw new Error(`Model ${modelChoice.model} supports 1080p only with 16:9 output.`);
-  }
-
-  if (mode === 'extension' && resolution !== '720p') {
-    throw new Error('Video extension only supports 720p output.');
-  }
-
-  if ((mode === 'reference' || mode === 'extension' || resolution !== '720p') && durationSeconds !== 8) {
-    throw new Error('Reference images, extension, 1080p, and 4k output require `--duration 8`.');
-  }
-
-  if (mode === 'prompt' || mode === 'extension') {
-    if (personGeneration !== 'allow_all') {
-      throw new Error('Text-to-video and extension only support `allow_all` for person generation on Veo 3.1.');
-    }
-  } else if (personGeneration !== 'allow_adult') {
-    throw new Error('Image-to-video, interpolation, and reference-image generation only support `allow_adult` on Veo 3.1.');
+  if (!params.prompt.trim()) {
+    throw new Error('A generation prompt is required.');
   }
 
   const inputSources = [
@@ -356,13 +348,14 @@ export function buildVideoCreateRequest(params: {
 
   return {
     kind: 'video',
+    provider,
     modelChoice,
     prompt: params.prompt.trim(),
     mode,
     aspectRatio,
     durationSeconds,
     resolution,
-    personGeneration,
+    ...(params.personGeneration ? {personGeneration: params.personGeneration} : {}),
     ...(params.negativePrompt?.trim()
       ? {negativePrompt: params.negativePrompt.trim()}
       : {}),

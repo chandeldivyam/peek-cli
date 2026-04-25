@@ -134,6 +134,7 @@ export function renderGenerationRecord(record: GenerationRecord): string {
 
   const sections = [
     `# Generated ${record.kind}`,
+    `Provider: ${record.provider}`,
     `Model: ${record.modelAlias ? `${record.modelAlias} (${record.model})` : record.model}`,
     `Mode: ${record.mode}`,
     `Created: ${record.createdAt}`,

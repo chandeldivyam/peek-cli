@@ -352,10 +352,10 @@ export class GeminiService {
     onProgress?: ProgressReporter;
   }): Promise<{operationName?: string; mimeType: string}> {
     params.onProgress?.(`Starting Veo generation with ${params.model}`);
+    const hasSourceInput = Boolean(params.image || params.lastFrame || params.video);
     let operation = await this.client.models.generateVideos({
       model: params.model,
-      prompt: params.prompt,
-      ...(params.image || params.lastFrame || params.video
+      ...(hasSourceInput
         ? {
             source: {
               prompt: params.prompt,
@@ -363,7 +363,7 @@ export class GeminiService {
               ...(params.video ? {video: await this.readVideo(params.video)} : {}),
             },
           }
-        : {}),
+        : {prompt: params.prompt}),
       config: {
         aspectRatio: params.aspectRatio,
         durationSeconds: params.durationSeconds,
