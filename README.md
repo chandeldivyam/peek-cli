@@ -42,9 +42,10 @@ peek install
 
 ## Generation
 
-Generation requires an explicit provider for agent workflows. Gemini uses `GEMINI_API_KEY`; xAI uses `XAI_API_KEY`. You can set those environment variables or store keys locally:
+Generation requires an explicit provider for agent workflows. Gemini uses `GEMINI_API_KEY`; xAI uses `XAI_API_KEY`. You can set those environment variables or store keys locally. Bare `peek auth` prompts for both provider keys; use `--provider` to configure just one:
 
 ```bash
+peek auth
 peek auth --provider gemini
 peek auth --provider xai
 ```

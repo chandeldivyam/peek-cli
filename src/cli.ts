@@ -3,6 +3,7 @@
 import 'dotenv/config';
 
 import {mkdir, stat, writeFile} from 'node:fs/promises';
+import {createRequire} from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import React from 'react';
@@ -48,6 +49,10 @@ import type {
   ResolvedAsset,
   WebMode,
 } from './types.js';
+
+const require = createRequire(import.meta.url);
+const packageJson = require('../package.json') as {version?: string};
+const CLI_VERSION = packageJson.version ?? '0.0.0';
 
 const paths = getAppPaths();
 const configStore = new ConfigStore(paths);
@@ -607,9 +612,13 @@ async function createVideo(prompt: string, options: {
   }
 }
 
-async function runAuth(provider: GenerationProviderId): Promise<void> {
+async function runAuth(provider?: GenerationProviderId): Promise<void> {
   await ensureAppPaths(paths);
-  await ensureProviderApiKey({configStore, provider, forcePrompt: true});
+  const providers: GenerationProviderId[] = provider ? [provider] : ['gemini', 'xai'];
+
+  for (const providerId of providers) {
+    await ensureProviderApiKey({configStore, provider: providerId, forcePrompt: true});
+  }
 }
 
 async function runInstall(version?: string): Promise<void> {
@@ -670,7 +679,7 @@ async function main(): Promise<void> {
     .name('peek')
     .description('Media analysis CLI for local files, Instagram, and YouTube.')
     .enablePositionalOptions()
-    .version('0.2.0')
+    .version(CLI_VERSION)
     .argument('[sources...]', 'Explicit image/video file paths or supported URLs to analyze');
 
   program
@@ -722,10 +731,10 @@ async function main(): Promise<void> {
 
   program
     .command('auth')
-    .description('Enter and verify an API key.')
-    .option('--provider <provider>', 'Provider to authenticate: gemini or xai', 'gemini')
+    .description('Enter and verify API keys.')
+    .option('--provider <provider>', 'Provider to authenticate: gemini or xai')
     .action(async (options: {provider?: string}) => {
-      await runAuth(parseGenerationProvider(options.provider));
+      await runAuth(options.provider ? parseGenerationProvider(options.provider) : undefined);
     });
 
   program
