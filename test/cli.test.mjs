@@ -17,5 +17,19 @@ test('bare auth command advertises provider selection without defaulting in help
   const {stdout} = await execFileAsync('node', ['dist/cli.js', 'auth', '--help']);
 
   assert.match(stdout, /--provider <provider>/);
+  assert.match(stdout, /openrouter/);
   assert.doesNotMatch(stdout, /default: "gemini"/);
+});
+
+test('video create help advertises OpenRouter as a provider', async () => {
+  const {stdout} = await execFileAsync('node', ['dist/cli.js', 'create', 'video', '--help']);
+
+  assert.match(stdout, /openrouter/);
+});
+
+test('agent help includes OpenRouter video examples', async () => {
+  const {stdout} = await execFileAsync('node', ['dist/cli.js', '--agent-help']);
+
+  assert.match(stdout, /--provider openrouter/);
+  assert.match(stdout, /bytedance\/seedance-2\.0-fast/);
 });

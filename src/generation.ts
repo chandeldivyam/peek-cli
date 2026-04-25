@@ -86,6 +86,10 @@ const videoModelAliases = new Map<string, VideoModelProfile>([
   ],
 ]);
 
+function isGenerationProviderId(value: string): value is GenerationProviderId {
+  return value === 'gemini' || value === 'xai' || value === 'openrouter';
+}
+
 export interface ResolvedGenerationSource {
   rawInput: string;
   source: SourceDescriptor;
@@ -139,11 +143,15 @@ export function resolveImageModelChoice(
   input?: string,
 ): ImageModelProfile {
   const provider: GenerationProviderId =
-    providerOrInput === 'gemini' || providerOrInput === 'xai' ? providerOrInput : 'gemini';
+    isGenerationProviderId(providerOrInput) ? providerOrInput : 'gemini';
   const modelInput =
-    providerOrInput === 'gemini' || providerOrInput === 'xai' ? input : providerOrInput;
+    isGenerationProviderId(providerOrInput) ? input : providerOrInput;
 
   if (!modelInput?.trim()) {
+    if (provider === 'openrouter') {
+      return {model: ''};
+    }
+
     return imageModelAliases.get(`${provider}:imagine`) ?? imageModelAliases.get(`${provider}:flash`)!;
   }
 
@@ -156,11 +164,22 @@ export function resolveVideoModelChoice(
   input?: string,
 ): VideoModelProfile {
   const provider: GenerationProviderId =
-    providerOrInput === 'gemini' || providerOrInput === 'xai' ? providerOrInput : 'gemini';
+    isGenerationProviderId(providerOrInput) ? providerOrInput : 'gemini';
   const modelInput =
-    providerOrInput === 'gemini' || providerOrInput === 'xai' ? input : providerOrInput;
+    isGenerationProviderId(providerOrInput) ? input : providerOrInput;
 
   if (!modelInput?.trim()) {
+    if (provider === 'openrouter') {
+      return {
+        model: 'bytedance/seedance-2.0-fast',
+        supportsReferenceImages: true,
+        supportsExtension: false,
+        supports4k: false,
+        supports1080p: false,
+        supportsPortrait1080p: false,
+      };
+    }
+
     return videoModelAliases.get(`${provider}:imagine`) ?? videoModelAliases.get(`${provider}:fast`)!;
   }
 
@@ -274,6 +293,14 @@ function inferVideoMode(params: {
   return 'prompt';
 }
 
+function getDefaultVideoDuration(provider: GenerationProviderId, model: string): number {
+  if (provider === 'openrouter' && model === 'kwaivgi/kling-video-o1') {
+    return 5;
+  }
+
+  return 4;
+}
+
 export function buildVideoCreateRequest(params: {
   provider?: GenerationProviderId;
   model?: string;
@@ -329,7 +356,7 @@ export function buildVideoCreateRequest(params: {
     hasVideo,
   });
   const aspectRatio = params.aspectRatio ?? '16:9';
-  const durationSeconds = params.durationSeconds ?? 4;
+  const durationSeconds = params.durationSeconds ?? getDefaultVideoDuration(provider, modelChoice.model);
   const resolution = params.resolution ?? '720p';
   if (!Number.isInteger(durationSeconds) || durationSeconds < 1) {
     throw new Error('Video duration must be a positive integer number of seconds.');

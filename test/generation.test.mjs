@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, rm} from 'node:fs/promises';
+import {mkdtemp, rm, writeFile} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,7 +12,8 @@ import {
   resolveVideoModelChoice,
 } from '../dist/generation.js';
 import {GenerationStore} from '../dist/generation-store.js';
-import {getGenerationProvider} from '../dist/providers/index.js';
+import {getGenerationProvider, parseGenerationProvider} from '../dist/providers/index.js';
+import {buildOpenRouterVideoRequestBody} from '../dist/providers/openrouter.js';
 
 async function withTempDir(run) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'peek-gen-test-'));
@@ -68,6 +69,11 @@ test('resolveVideoModelChoice maps aliases to Veo models', () => {
 test('resolveVideoModelChoice maps xAI video aliases', () => {
   assert.equal(resolveVideoModelChoice('xai', 'imagine').model, 'grok-imagine-video');
   assert.equal(resolveVideoModelChoice('xai').model, 'grok-imagine-video');
+});
+
+test('parseGenerationProvider accepts OpenRouter', () => {
+  assert.equal(parseGenerationProvider('openrouter'), 'openrouter');
+  assert.equal(parseGenerationProvider('OpenRouter'), 'openrouter');
 });
 
 test('planOutputAssets uses a direct file path for a single explicit output file', () => {
@@ -158,6 +164,154 @@ test('xAI provider validates its video limits', () => {
   );
 });
 
+test('OpenRouter rejects ByteDance Seed text model for video', () => {
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'bytedance-seed/seed-2.0-mini',
+        prompt: 'animate this',
+        referenceSources: [],
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /not an OpenRouter video-generation model/,
+  );
+});
+
+test('OpenRouter Seedance validates duration, resolution, and aspect ratio', () => {
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'bytedance/seedance-2.0',
+        prompt: 'animate this',
+        referenceSources: [],
+        durationSeconds: 16,
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /between 4 and 15/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'bytedance/seedance-2.0-fast',
+        prompt: 'animate this',
+        referenceSources: [],
+        resolution: '1080p',
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /480p, 720p/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'bytedance/seedance-2.0',
+        prompt: 'animate this',
+        referenceSources: [],
+        aspectRatio: '3:2',
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /aspect ratio/,
+  );
+});
+
+test('OpenRouter Kling validates unsupported options', () => {
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'kwaivgi/kling-video-o1',
+        prompt: 'animate this',
+        referenceSources: [],
+        durationSeconds: 4,
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /duration/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'kwaivgi/kling-video-o1',
+        prompt: 'animate this',
+        referenceSources: [],
+        resolution: '480p',
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /resolution/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'kwaivgi/kling-video-o1',
+        prompt: 'animate this',
+        referenceSources: [],
+        aspectRatio: '4:3',
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /aspect ratio/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'kwaivgi/kling-video-o1',
+        prompt: 'animate this',
+        referenceSources: [
+          createSource('/tmp/ref.png', [createAsset('image', '/tmp/ref.png', 'image/png')]),
+        ],
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /does not support `--reference`/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'kwaivgi/kling-video-o1',
+        prompt: 'animate this',
+        referenceSources: [],
+        seed: 123,
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /does not support `--seed`/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildVideoCreateRequest({
+        provider: 'openrouter',
+        model: 'kwaivgi/kling-video-o1',
+        prompt: 'animate this',
+        referenceSources: [],
+        videoSource: createSource('/tmp/video.mp4', [
+          createAsset('video', '/tmp/video.mp4', 'video/mp4'),
+        ]),
+      });
+      getGenerationProvider('openrouter').validateVideoRequest(request);
+    },
+    /does not support `--video` extension/,
+  );
+});
+
 test('buildVideoCreateRequest rejects last-frame without image', () => {
   assert.throws(
     () =>
@@ -170,6 +324,55 @@ test('buildVideoCreateRequest rejects last-frame without image', () => {
       }),
     /requires `--image`/,
   );
+});
+
+test('buildOpenRouterVideoRequestBody maps frame image inputs', async () => {
+  await withTempDir(async (tempDir) => {
+    const startPath = path.join(tempDir, 'start.png');
+    const endPath = path.join(tempDir, 'end.png');
+    await writeFile(startPath, 'start-bytes');
+    await writeFile(endPath, 'end-bytes');
+
+    const request = buildVideoCreateRequest({
+      provider: 'openrouter',
+      model: 'bytedance/seedance-2.0',
+      prompt: 'move from start to end',
+      imageSource: createSource(startPath, [createAsset('image', startPath, 'image/png')]),
+      lastFrameSource: createSource(endPath, [createAsset('image', endPath, 'image/png')]),
+      referenceSources: [],
+    });
+    const body = await buildOpenRouterVideoRequestBody(request);
+
+    assert.equal(body.model, 'bytedance/seedance-2.0');
+    assert.equal(body.prompt, 'move from start to end');
+    assert.deepEqual(body.frame_images.map((image) => image.frame_type), [
+      'first_frame',
+      'last_frame',
+    ]);
+    assert.match(body.frame_images[0].image_url.url, /^data:image\/png;base64,/);
+  });
+});
+
+test('buildOpenRouterVideoRequestBody maps reference inputs', async () => {
+  await withTempDir(async (tempDir) => {
+    const refPath = path.join(tempDir, 'ref.jpg');
+    await writeFile(refPath, 'ref-bytes');
+
+    const request = buildVideoCreateRequest({
+      provider: 'openrouter',
+      model: 'bytedance/seedance-2.0-fast',
+      prompt: 'keep this style',
+      referenceSources: [
+        createSource(refPath, [createAsset('image', refPath, 'image/jpeg')]),
+      ],
+      seed: 42,
+    });
+    const body = await buildOpenRouterVideoRequestBody(request);
+
+    assert.equal(body.seed, 42);
+    assert.equal(body.input_references.length, 1);
+    assert.match(body.input_references[0].image_url.url, /^data:image\/jpeg;base64,/);
+  });
 });
 
 test('GenerationStore persists and reloads generation records', async () => {
@@ -207,6 +410,11 @@ test('GenerationStore persists and reloads generation records', async () => {
           createdAt: '2026-04-05T00:00:00.000Z',
         },
       ],
+      usage: {
+        cost: 0.25,
+        isByok: false,
+        raw: {cost: 0.25, is_byok: false},
+      },
       options: {count: 1},
     });
 
@@ -214,5 +422,6 @@ test('GenerationStore persists and reloads generation records', async () => {
     assert.equal(loaded?.prompt, 'red square');
     assert.equal(loaded?.provider, 'gemini');
     assert.equal(loaded?.outputs[0]?.path, '/tmp/output.jpg');
+    assert.equal(loaded?.usage?.cost, 0.25);
   });
 });

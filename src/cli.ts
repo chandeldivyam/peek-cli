@@ -391,8 +391,6 @@ async function createImage(prompt: string, options: {
   await ensureAppPaths(paths);
   const providerId = parseGenerationProvider(options.provider);
   const provider = getGenerationProvider(providerId);
-  const apiKey = await ensureProviderApiKey({configStore, provider: providerId});
-  const client = provider.createClient(apiKey);
   const inputSources = await Promise.all((options.input ?? []).map((input) => resolveGenerationSource(input)));
   const request = buildImageCreateRequest({
     provider: providerId,
@@ -407,6 +405,8 @@ async function createImage(prompt: string, options: {
     ...(typeof options.json === 'boolean' ? {json: options.json} : {}),
   });
   provider.validateImageRequest(request);
+  const apiKey = await ensureProviderApiKey({configStore, provider: providerId});
+  const client = provider.createClient(apiKey);
 
   intro('peek create image');
   const progress = spinner();
@@ -503,8 +503,6 @@ async function createVideo(prompt: string, options: {
   await ensureAppPaths(paths);
   const providerId = parseGenerationProvider(options.provider);
   const provider = getGenerationProvider(providerId);
-  const apiKey = await ensureProviderApiKey({configStore, provider: providerId});
-  const client = provider.createClient(apiKey);
 
   const imageSource = options.image ? await resolveGenerationSource(options.image) : undefined;
   const lastFrameSource = options.lastFrame
@@ -535,6 +533,8 @@ async function createVideo(prompt: string, options: {
     ...(typeof options.json === 'boolean' ? {json: options.json} : {}),
   });
   provider.validateVideoRequest(request);
+  const apiKey = await ensureProviderApiKey({configStore, provider: providerId});
+  const client = provider.createClient(apiKey);
 
   intro('peek create video');
   const progress = spinner();
@@ -595,6 +595,7 @@ async function createVideo(prompt: string, options: {
         ...(options.video ? {video: options.video} : {}),
       },
       ...(result.operationName ? {operationName: result.operationName} : {}),
+      ...(result.usage ? {usage: result.usage} : {}),
     };
 
     await generationStore.store(record);
@@ -614,7 +615,7 @@ async function createVideo(prompt: string, options: {
 
 async function runAuth(provider?: GenerationProviderId): Promise<void> {
   await ensureAppPaths(paths);
-  const providers: GenerationProviderId[] = provider ? [provider] : ['gemini', 'xai'];
+  const providers: GenerationProviderId[] = provider ? [provider] : ['gemini', 'xai', 'openrouter'];
 
   for (const providerId of providers) {
     await ensureProviderApiKey({configStore, provider: providerId, forcePrompt: true});
@@ -732,7 +733,7 @@ async function main(): Promise<void> {
   program
     .command('auth')
     .description('Enter and verify API keys.')
-    .option('--provider <provider>', 'Provider to authenticate: gemini or xai')
+    .option('--provider <provider>', 'Provider to authenticate: gemini, xai, or openrouter')
     .action(async (options: {provider?: string}) => {
       await runAuth(options.provider ? parseGenerationProvider(options.provider) : undefined);
     });
@@ -763,7 +764,7 @@ async function main(): Promise<void> {
     .description('Generate one or more images.')
     .argument('[prompt]', 'Prompt to generate from')
     .option('--agent-help', 'Print agent-oriented image generation guidance', false)
-    .option('--provider <provider>', 'Generation provider: gemini or xai', 'gemini')
+    .option('--provider <provider>', 'Generation provider: gemini, xai, or openrouter', 'gemini')
     .option('--model <model>', 'Image model alias or raw model id')
     .option('--input <source>', 'Reference image input (repeatable)', collectValues, [])
     .option('--count <count>', 'Number of images to generate', (value) => Number.parseInt(value, 10), 1)
@@ -809,7 +810,7 @@ async function main(): Promise<void> {
     .description('Generate a video.')
     .argument('[prompt]', 'Prompt to generate from')
     .option('--agent-help', 'Print agent-oriented video generation guidance', false)
-    .option('--provider <provider>', 'Generation provider: gemini or xai', 'gemini')
+    .option('--provider <provider>', 'Generation provider: gemini, xai, or openrouter', 'gemini')
     .option('--model <model>', 'Video model alias or raw model id')
     .option('--image <source>', 'Single input image for image-to-video')
     .option('--last-frame <source>', 'Single final image for interpolation')

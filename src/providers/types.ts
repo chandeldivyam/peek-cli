@@ -14,6 +14,11 @@ export interface GeneratedBinaryOutput {
 export interface GeneratedVideoOutput {
   operationName?: string;
   mimeType: string;
+  usage?: {
+    cost?: number;
+    isByok?: boolean;
+    raw: unknown;
+  };
 }
 
 export interface GenerationProvider {

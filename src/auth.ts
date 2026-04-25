@@ -15,17 +15,33 @@ import type {GenerationProviderId} from './types.js';
 const providerEnvVars: Record<GenerationProviderId, string> = {
   gemini: 'GEMINI_API_KEY',
   xai: 'XAI_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
 };
 
 const providerLabels: Record<GenerationProviderId, string> = {
   gemini: 'Google Gen AI',
   xai: 'xAI',
+  openrouter: 'OpenRouter',
 };
 
 async function verifyProviderApiKey(provider: GenerationProviderId, apiKey: string): Promise<void> {
   if (provider === 'gemini') {
     const gemini = new GeminiService(apiKey);
     await gemini.verifyApiKey();
+    return;
+  }
+
+  if (provider === 'openrouter') {
+    const response = await fetch('https://openrouter.ai/api/v1/key', {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`OpenRouter API key verification failed (${response.status}): ${detail}`);
+    }
     return;
   }
 

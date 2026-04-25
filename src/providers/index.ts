@@ -1,4 +1,5 @@
 import {geminiProvider} from './gemini.js';
+import {openRouterProvider} from './openrouter.js';
 import {xaiProvider} from './xai.js';
 import type {GenerationProviderId} from '../types.js';
 import type {GenerationProvider} from './types.js';
@@ -6,6 +7,7 @@ import type {GenerationProvider} from './types.js';
 const generationProviders: Record<GenerationProviderId, GenerationProvider> = {
   gemini: geminiProvider,
   xai: xaiProvider,
+  openrouter: openRouterProvider,
 };
 
 export function getGenerationProvider(provider: GenerationProviderId): GenerationProvider {
@@ -14,11 +16,11 @@ export function getGenerationProvider(provider: GenerationProviderId): Generatio
 
 export function parseGenerationProvider(value?: string): GenerationProviderId {
   const normalized = value?.trim().toLowerCase() || 'gemini';
-  if (normalized === 'gemini' || normalized === 'xai') {
+  if (normalized === 'gemini' || normalized === 'xai' || normalized === 'openrouter') {
     return normalized;
   }
 
-  throw new Error(`Unknown generation provider "${value}". Use "gemini" or "xai".`);
+  throw new Error(`Unknown generation provider "${value}". Use "gemini", "xai", or "openrouter".`);
 }
 
 export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = 'root'): string {
@@ -29,6 +31,7 @@ export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = '
     'peek create image --provider gemini "A clean product poster"',
     'peek create image --provider xai --size 2k "A campaign visual"',
     'peek create video --provider xai --duration 10 --resolution 720p "A cinematic product shot"',
+    'peek create video --provider openrouter --model bytedance/seedance-2.0-fast --duration 4 --resolution 480p "A kinetic product reveal"',
   ];
 
   const root = [
@@ -55,14 +58,18 @@ export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = '
     'Provider selection:',
     '- `--provider gemini` uses Gemini/Nano Banana for images and Veo for videos.',
     '- `--provider xai` uses Grok Imagine image and video models.',
+    '- `--provider openrouter` uses OpenRouter video-generation models only.',
     '',
     'Authentication:',
     '- Gemini: set GEMINI_API_KEY or run `peek auth --provider gemini`.',
     '- xAI: set XAI_API_KEY or run `peek auth --provider xai`.',
+    '- OpenRouter: set OPENROUTER_API_KEY or run `peek auth --provider openrouter`.',
     '',
     geminiProvider.getAgentHelp(),
     '',
     xaiProvider.getAgentHelp(),
+    '',
+    openRouterProvider.getAgentHelp(),
   ];
 
   const image = [
@@ -75,6 +82,8 @@ export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = '
     '- peek create image --provider gemini --model pro "Premium coffee campaign art" --output ./poster.jpg',
     '- peek create image --provider xai --size 2k --count 3 "Three fashion lookbook frames" --output ./frames',
     '- peek create image --provider xai --input ./ref.jpg "Render this as a pencil sketch"',
+    '',
+    'OpenRouter does not support image generation in peek.',
   ];
 
   const video = [
@@ -87,6 +96,9 @@ export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = '
     '- peek create video --provider gemini --model fast "A shoe rotating on a pedestal"',
     '- peek create video --provider xai --duration 10 --resolution 720p "A drone shot over a futuristic city"',
     '- peek create video --provider xai --image ./start.png "Animate this product packshot"',
+    '- peek create video --provider openrouter --model bytedance/seedance-2.0 "A drone shot over a futuristic city"',
+    '- peek create video --provider openrouter --model bytedance/seedance-2.0-fast --image ./start.png "Animate this product packshot"',
+    '- peek create video --provider openrouter --model kwaivgi/kling-video-o1 --duration 5 "A cinematic street scene"',
   ];
 
   return {

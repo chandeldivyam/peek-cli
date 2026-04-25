@@ -154,5 +154,13 @@ export function renderGenerationRecord(record: GenerationRecord): string {
     sections.push('', '## Operation', record.operationName);
   }
 
+  if (record.usage) {
+    const usageLines = [
+      ...(typeof record.usage.cost === 'number' ? [`- Cost: ${record.usage.cost}`] : []),
+      ...(typeof record.usage.isByok === 'boolean' ? [`- BYOK: ${record.usage.isByok ? 'yes' : 'no'}`] : []),
+    ];
+    sections.push('', '## Usage', usageLines.length > 0 ? usageLines.join('\n') : '- Usage data returned by provider');
+  }
+
   return sections.join('\n');
 }

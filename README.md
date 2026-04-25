@@ -1,6 +1,6 @@
 # peek-cli
 
-Media analysis and generation CLI powered by Gemini, Veo, and xAI.
+Media analysis and generation CLI powered by Gemini, Veo, xAI, and OpenRouter video models.
 
 ## Install
 
@@ -34,6 +34,7 @@ peek create image --provider gemini "A bold product poster for a coffee brand"
 peek create image --provider xai "A bold product poster for a coffee brand"
 peek create video --provider gemini "A cinematic shot of a shoe rotating on a pedestal"
 peek create video --provider xai --duration 10 "A cinematic shot of a shoe rotating on a pedestal"
+peek create video --provider openrouter --model bytedance/seedance-2.0-fast --duration 4 --resolution 480p "A cinematic shot of a shoe rotating on a pedestal"
 peek --agent-help
 peek install
 ```
@@ -42,12 +43,13 @@ peek install
 
 ## Generation
 
-Generation requires an explicit provider for agent workflows. Gemini uses `GEMINI_API_KEY`; xAI uses `XAI_API_KEY`. You can set those environment variables or store keys locally. Bare `peek auth` prompts for both provider keys; use `--provider` to configure just one:
+Generation requires an explicit provider for agent workflows. Gemini uses `GEMINI_API_KEY`; xAI uses `XAI_API_KEY`; OpenRouter uses `OPENROUTER_API_KEY`. You can set those environment variables or store keys locally. Bare `peek auth` prompts for all provider keys; use `--provider` to configure just one:
 
 ```bash
 peek auth
 peek auth --provider gemini
 peek auth --provider xai
+peek auth --provider openrouter
 ```
 
 ```bash
@@ -69,6 +71,13 @@ peek create video --provider xai "A cinematic shot of a shoe rotating on a pedes
 peek create video --provider xai "Animate this packaging render" --image ./packshot.png --duration 8
 peek create video --provider xai "Keep the same character and scene language" --reference ./ref1.jpg --reference ./ref2.jpg --duration 8
 peek create video --provider xai "Extend this clip by another beat" --video ./clip.mp4 --duration 8 --resolution 720p
+
+peek create video --provider openrouter --model bytedance/seedance-2.0 "A cinematic shot of a shoe rotating on a pedestal" --duration 4 --resolution 720p
+peek create video --provider openrouter --model bytedance/seedance-2.0-fast "Animate this packaging render" --image ./packshot.png --duration 4 --resolution 480p
+peek create video --provider openrouter --model bytedance/seedance-2.0 "Move from frame A to frame B" --image ./start.png --last-frame ./end.png --duration 4
+peek create video --provider openrouter --model bytedance/seedance-2.0 "Keep the same character and scene language" --reference ./ref1.jpg --reference ./ref2.jpg --duration 4
+peek create video --provider openrouter --model kwaivgi/kling-video-o1 "A cinematic shot of a shoe rotating on a pedestal" --duration 5 --resolution 720p
+peek create video --provider openrouter --model kwaivgi/kling-video-o1 "Move from frame A to frame B" --image ./start.png --last-frame ./end.png --duration 5
 ```
 
 Model aliases:
@@ -80,6 +89,7 @@ Model aliases:
 - `peek create video --model quality` -> `veo-3.1-generate-preview`
 - `peek create video --model lite` -> `veo-3.1-lite-generate-preview`
 - `peek create video --provider xai --model imagine` -> `grok-imagine-video`
+- OpenRouter uses raw model slugs only, for example `bytedance/seedance-2.0`, `bytedance/seedance-2.0-fast`, and `kwaivgi/kling-video-o1`.
 
 Generated files are written to `./peek-output/...` by default, or to the path supplied with `--output`. Those outputs can be fed straight back into `peek`, `peek ask`, and `peek inspect`.
 
