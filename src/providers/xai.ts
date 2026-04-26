@@ -69,6 +69,18 @@ function normalizeXaiImageResolution(value?: string): '1k' | '2k' | undefined {
   throw new Error('xAI image resolution must be 1k or 2k.');
 }
 
+function rejectOpenAiImageControls(request: ImageCreateRequest): void {
+  if (
+    request.quality ||
+    request.outputFormat ||
+    request.background ||
+    typeof request.outputCompression === 'number' ||
+    request.moderation
+  ) {
+    throw new Error('xAI image generation does not support OpenAI output controls.');
+  }
+}
+
 function getDownloadedMimeType(response: Response, fallback: string): string {
   return response.headers.get('content-type')?.split(';')[0]?.trim() || fallback;
 }
@@ -275,6 +287,8 @@ export const xaiProvider: GenerationProvider = {
     return resolveVideoModelChoice('xai', input);
   },
   validateImageRequest(request: ImageCreateRequest) {
+    rejectOpenAiImageControls(request);
+
     if (request.personGeneration) {
       throw new Error('xAI image generation does not support `--person-generation`.');
     }

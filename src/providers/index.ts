@@ -1,4 +1,5 @@
 import {geminiProvider} from './gemini.js';
+import {openAiProvider} from './openai.js';
 import {openRouterProvider} from './openrouter.js';
 import {xaiProvider} from './xai.js';
 import type {GenerationProviderId} from '../types.js';
@@ -8,6 +9,7 @@ const generationProviders: Record<GenerationProviderId, GenerationProvider> = {
   gemini: geminiProvider,
   xai: xaiProvider,
   openrouter: openRouterProvider,
+  openai: openAiProvider,
 };
 
 export function getGenerationProvider(provider: GenerationProviderId): GenerationProvider {
@@ -16,11 +18,11 @@ export function getGenerationProvider(provider: GenerationProviderId): Generatio
 
 export function parseGenerationProvider(value?: string): GenerationProviderId {
   const normalized = value?.trim().toLowerCase() || 'gemini';
-  if (normalized === 'gemini' || normalized === 'xai' || normalized === 'openrouter') {
+  if (normalized === 'gemini' || normalized === 'xai' || normalized === 'openrouter' || normalized === 'openai') {
     return normalized;
   }
 
-  throw new Error(`Unknown generation provider "${value}". Use "gemini", "xai", or "openrouter".`);
+  throw new Error(`Unknown generation provider "${value}". Use "gemini", "xai", "openrouter", or "openai".`);
 }
 
 export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = 'root'): string {
@@ -30,6 +32,7 @@ export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = '
     'peek ask <file-or-url> "What is happening here?"',
     'peek create image --provider gemini "A clean product poster"',
     'peek create image --provider xai --size 2k "A campaign visual"',
+    'peek create image --provider openai --model gpt-image-2 --quality low "A fast product concept"',
     'peek create video --provider xai --duration 10 --resolution 720p "A cinematic product shot"',
     'peek create video --provider openrouter --model bytedance/seedance-2.0-fast --duration 4 --resolution 480p "A kinetic product reveal"',
   ];
@@ -59,17 +62,21 @@ export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = '
     '- `--provider gemini` uses Gemini/Nano Banana for images and Veo for videos.',
     '- `--provider xai` uses Grok Imagine image and video models.',
     '- `--provider openrouter` uses OpenRouter video-generation models only.',
+    '- `--provider openai` uses GPT Image 2 for image generation and edits only.',
     '',
     'Authentication:',
     '- Gemini: set GEMINI_API_KEY or run `peek auth --provider gemini`.',
     '- xAI: set XAI_API_KEY or run `peek auth --provider xai`.',
     '- OpenRouter: set OPENROUTER_API_KEY or run `peek auth --provider openrouter`.',
+    '- OpenAI: set OPENAI_API_KEY or run `peek auth --provider openai`.',
     '',
     geminiProvider.getAgentHelp(),
     '',
     xaiProvider.getAgentHelp(),
     '',
     openRouterProvider.getAgentHelp(),
+    '',
+    openAiProvider.getAgentHelp(),
   ];
 
   const image = [
@@ -77,13 +84,17 @@ export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = '
     '',
     'Use for text-to-image or image editing.',
     'Common options: --provider, --model, --input, --count, --aspect-ratio, --size, --output, --json.',
+    'OpenAI-only output controls: --quality, --output-format, --compression, --background, --moderation.',
     '',
     'Examples:',
     '- peek create image --provider gemini --model pro "Premium coffee campaign art" --output ./poster.jpg',
     '- peek create image --provider xai --size 2k --count 3 "Three fashion lookbook frames" --output ./frames',
     '- peek create image --provider xai --input ./ref.jpg "Render this as a pencil sketch"',
+    '- peek create image --provider openai --model gpt-image-2 --quality low --output-format jpeg "Fast campaign concept"',
+    '- peek create image --provider openai --input ./ref.jpg --background opaque "Turn this into a polished launch graphic"',
     '',
     'OpenRouter does not support image generation in peek.',
+    'OpenAI does not support video generation in peek.',
   ];
 
   const video = [
@@ -99,6 +110,8 @@ export function renderAgentHelp(topic: 'root' | 'create' | 'image' | 'video' = '
     '- peek create video --provider openrouter --model bytedance/seedance-2.0 "A drone shot over a futuristic city"',
     '- peek create video --provider openrouter --model bytedance/seedance-2.0-fast --image ./start.png "Animate this product packshot"',
     '- peek create video --provider openrouter --model kwaivgi/kling-video-o1 --duration 5 "A cinematic street scene"',
+    '',
+    'OpenAI does not support video generation in peek.',
   ];
 
   return {

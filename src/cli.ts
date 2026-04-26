@@ -385,6 +385,11 @@ async function createImage(prompt: string, options: {
   aspectRatio?: string;
   size?: string;
   personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
+  quality?: 'low' | 'medium' | 'high' | 'auto';
+  outputFormat?: 'png' | 'jpeg' | 'webp';
+  background?: 'auto' | 'opaque' | 'transparent';
+  compression?: number;
+  moderation?: 'auto' | 'low';
   output?: string;
   json?: boolean;
 }): Promise<void> {
@@ -401,6 +406,11 @@ async function createImage(prompt: string, options: {
     ...(options.aspectRatio ? {aspectRatio: options.aspectRatio} : {}),
     ...(options.size ? {imageSize: options.size} : {}),
     ...(options.personGeneration ? {personGeneration: options.personGeneration} : {}),
+    ...(options.quality ? {quality: options.quality} : {}),
+    ...(options.outputFormat ? {outputFormat: options.outputFormat} : {}),
+    ...(options.background ? {background: options.background} : {}),
+    ...(typeof options.compression === 'number' ? {outputCompression: options.compression} : {}),
+    ...(options.moderation ? {moderation: options.moderation} : {}),
     ...(options.output ? {outputPath: options.output} : {}),
     ...(typeof options.json === 'boolean' ? {json: options.json} : {}),
   });
@@ -465,8 +475,14 @@ async function createImage(prompt: string, options: {
         ...(request.aspectRatio ? {aspectRatio: request.aspectRatio} : {}),
         ...(request.imageSize ? {imageSize: request.imageSize} : {}),
         ...(request.personGeneration ? {personGeneration: request.personGeneration} : {}),
+        ...(request.quality ? {quality: request.quality} : {}),
+        ...(request.outputFormat ? {outputFormat: request.outputFormat} : {}),
+        ...(request.background ? {background: request.background} : {}),
+        ...(typeof request.outputCompression === 'number' ? {outputCompression: request.outputCompression} : {}),
+        ...(request.moderation ? {moderation: request.moderation} : {}),
         input: options.input,
       },
+      ...(generatedOutputs[0]?.usage ? {usage: generatedOutputs[0].usage} : {}),
     };
 
     await generationStore.store(record);
@@ -615,7 +631,7 @@ async function createVideo(prompt: string, options: {
 
 async function runAuth(provider?: GenerationProviderId): Promise<void> {
   await ensureAppPaths(paths);
-  const providers: GenerationProviderId[] = provider ? [provider] : ['gemini', 'xai', 'openrouter'];
+  const providers: GenerationProviderId[] = provider ? [provider] : ['gemini', 'xai', 'openrouter', 'openai'];
 
   for (const providerId of providers) {
     await ensureProviderApiKey({configStore, provider: providerId, forcePrompt: true});
@@ -733,7 +749,7 @@ async function main(): Promise<void> {
   program
     .command('auth')
     .description('Enter and verify API keys.')
-    .option('--provider <provider>', 'Provider to authenticate: gemini, xai, or openrouter')
+    .option('--provider <provider>', 'Provider to authenticate: gemini, xai, openrouter, or openai')
     .action(async (options: {provider?: string}) => {
       await runAuth(options.provider ? parseGenerationProvider(options.provider) : undefined);
     });
@@ -764,13 +780,18 @@ async function main(): Promise<void> {
     .description('Generate one or more images.')
     .argument('[prompt]', 'Prompt to generate from')
     .option('--agent-help', 'Print agent-oriented image generation guidance', false)
-    .option('--provider <provider>', 'Generation provider: gemini, xai, or openrouter', 'gemini')
+    .option('--provider <provider>', 'Generation provider: gemini, xai, openrouter, or openai', 'gemini')
     .option('--model <model>', 'Image model alias or raw model id')
     .option('--input <source>', 'Reference image input (repeatable)', collectValues, [])
     .option('--count <count>', 'Number of images to generate', (value) => Number.parseInt(value, 10), 1)
     .option('--aspect-ratio <ratio>', 'Image aspect ratio, for example 1:1 or 16:9')
-    .option('--size <size>', 'Image size/resolution, for example 1K, 2K, 4K, 1k, or 2k')
+    .option('--size <size>', 'Image size/resolution, for example 1K, 2K, 4K, 1k, 2k, auto, or 1024x1024')
     .option('--person-generation <mode>', 'allow_all, allow_adult, or allow_none')
+    .option('--quality <quality>', 'OpenAI image quality: low, medium, high, or auto')
+    .option('--output-format <format>', 'OpenAI image output format: png, jpeg, or webp')
+    .option('--background <background>', 'OpenAI image background: auto or opaque')
+    .option('--compression <percent>', 'OpenAI JPEG/WebP output compression, 0-100', (value) => Number.parseInt(value, 10))
+    .option('--moderation <mode>', 'OpenAI moderation strictness: auto or low')
     .option('--json', 'Print generation metadata as JSON', false)
     .option('-o, --output <path>', 'Output file or directory for generated assets')
     .action(async function (
@@ -786,6 +807,11 @@ async function main(): Promise<void> {
         aspectRatio?: string;
         size?: string;
         personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
+        quality?: 'low' | 'medium' | 'high' | 'auto';
+        outputFormat?: 'png' | 'jpeg' | 'webp';
+        background?: 'auto' | 'opaque' | 'transparent';
+        compression?: number;
+        moderation?: 'auto' | 'low';
         output?: string;
         json?: boolean;
       };
@@ -810,7 +836,7 @@ async function main(): Promise<void> {
     .description('Generate a video.')
     .argument('[prompt]', 'Prompt to generate from')
     .option('--agent-help', 'Print agent-oriented video generation guidance', false)
-    .option('--provider <provider>', 'Generation provider: gemini, xai, or openrouter', 'gemini')
+    .option('--provider <provider>', 'Generation provider: gemini, xai, openrouter, or openai', 'gemini')
     .option('--model <model>', 'Video model alias or raw model id')
     .option('--image <source>', 'Single input image for image-to-video')
     .option('--last-frame <source>', 'Single final image for interpolation')

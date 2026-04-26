@@ -16,12 +16,14 @@ const providerEnvVars: Record<GenerationProviderId, string> = {
   gemini: 'GEMINI_API_KEY',
   xai: 'XAI_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
+  openai: 'OPENAI_API_KEY',
 };
 
 const providerLabels: Record<GenerationProviderId, string> = {
   gemini: 'Google Gen AI',
   xai: 'xAI',
   openrouter: 'OpenRouter',
+  openai: 'OpenAI',
 };
 
 async function verifyProviderApiKey(provider: GenerationProviderId, apiKey: string): Promise<void> {
@@ -41,6 +43,20 @@ async function verifyProviderApiKey(provider: GenerationProviderId, apiKey: stri
     if (!response.ok) {
       const detail = await response.text();
       throw new Error(`OpenRouter API key verification failed (${response.status}): ${detail}`);
+    }
+    return;
+  }
+
+  if (provider === 'openai') {
+    const response = await fetch('https://api.openai.com/v1/models', {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`OpenAI API key verification failed (${response.status}): ${detail}`);
     }
     return;
   }

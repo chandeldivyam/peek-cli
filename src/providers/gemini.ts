@@ -26,6 +26,18 @@ function getGeminiPersonGeneration(
     (request.mode === 'prompt' || request.mode === 'extension' ? 'allow_all' : 'allow_adult');
 }
 
+function rejectOpenAiImageControls(request: ImageCreateRequest, providerLabel: string): void {
+  if (
+    request.quality ||
+    request.outputFormat ||
+    request.background ||
+    typeof request.outputCompression === 'number' ||
+    request.moderation
+  ) {
+    throw new Error(`${providerLabel} image generation does not support OpenAI output controls.`);
+  }
+}
+
 export const geminiProvider: GenerationProvider = {
   id: 'gemini',
   label: 'Google Gemini',
@@ -39,6 +51,8 @@ export const geminiProvider: GenerationProvider = {
     return resolveVideoModelChoice('gemini', input);
   },
   validateImageRequest(request: ImageCreateRequest) {
+    rejectOpenAiImageControls(request, 'Gemini');
+
     if (request.count > 8) {
       throw new Error('Gemini image generation count must be an integer between 1 and 8.');
     }

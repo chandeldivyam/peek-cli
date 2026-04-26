@@ -18,6 +18,7 @@ test('bare auth command advertises provider selection without defaulting in help
 
   assert.match(stdout, /--provider <provider>/);
   assert.match(stdout, /openrouter/);
+  assert.match(stdout, /openai/);
   assert.doesNotMatch(stdout, /default: "gemini"/);
 });
 
@@ -27,9 +28,19 @@ test('video create help advertises OpenRouter as a provider', async () => {
   assert.match(stdout, /openrouter/);
 });
 
-test('agent help includes OpenRouter video examples', async () => {
+test('image create help advertises OpenAI output controls', async () => {
+  const {stdout} = await execFileAsync('node', ['dist/cli.js', 'create', 'image', '--help']);
+
+  assert.match(stdout, /openai/);
+  assert.match(stdout, /--quality/);
+  assert.match(stdout, /--output-format/);
+});
+
+test('agent help includes OpenRouter video and OpenAI image examples', async () => {
   const {stdout} = await execFileAsync('node', ['dist/cli.js', '--agent-help']);
 
   assert.match(stdout, /--provider openrouter/);
   assert.match(stdout, /bytedance\/seedance-2\.0-fast/);
+  assert.match(stdout, /--provider openai/);
+  assert.match(stdout, /gpt-image-2/);
 });

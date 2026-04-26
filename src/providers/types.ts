@@ -9,6 +9,11 @@ export interface GeneratedBinaryOutput {
   bytes: Buffer;
   mimeType: string;
   kind: MediaKind;
+  usage?: {
+    cost?: number;
+    isByok?: boolean;
+    raw: unknown;
+  };
 }
 
 export interface GeneratedVideoOutput {

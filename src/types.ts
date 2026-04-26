@@ -20,7 +20,7 @@ export type RemoteProvider = z.infer<typeof remoteProviderSchema>;
 export const mediaKindSchema = z.enum(['image', 'video']);
 export type MediaKind = z.infer<typeof mediaKindSchema>;
 
-export const generationProviderSchema = z.enum(['gemini', 'xai', 'openrouter']);
+export const generationProviderSchema = z.enum(['gemini', 'xai', 'openrouter', 'openai']);
 export type GenerationProviderId = z.infer<typeof generationProviderSchema>;
 
 export const generationKindSchema = z.enum(['image', 'video']);

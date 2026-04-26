@@ -1,6 +1,6 @@
 {
   "name": "peek",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Media analysis CLI for local files, Instagram, and YouTube.",
   "type": "module",
   "bin": {

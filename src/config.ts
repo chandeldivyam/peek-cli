@@ -17,6 +17,7 @@ const providerEnvVars: Record<GenerationProviderId, string> = {
   gemini: 'GEMINI_API_KEY',
   xai: 'XAI_API_KEY',
   openrouter: 'OPENROUTER_API_KEY',
+  openai: 'OPENAI_API_KEY',
 };
 
 export function getAppPaths(): AppPaths {

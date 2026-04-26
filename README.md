@@ -1,6 +1,6 @@
 # peek-cli
 
-Media analysis and generation CLI powered by Gemini, Veo, xAI, and OpenRouter video models.
+Media analysis and generation CLI powered by Gemini, Veo, xAI, OpenRouter video models, and OpenAI GPT Image.
 
 ## Install
 
@@ -32,6 +32,7 @@ peek inspect https://www.instagram.com/p/DWjuLqzEbJb
 peek cache clear https://www.youtube.com/shorts/SJT-eFH4Zs0
 peek create image --provider gemini "A bold product poster for a coffee brand"
 peek create image --provider xai "A bold product poster for a coffee brand"
+peek create image --provider openai --model gpt-image-2 --quality low "A bold product poster for a coffee brand"
 peek create video --provider gemini "A cinematic shot of a shoe rotating on a pedestal"
 peek create video --provider xai --duration 10 "A cinematic shot of a shoe rotating on a pedestal"
 peek create video --provider openrouter --model bytedance/seedance-2.0-fast --duration 4 --resolution 480p "A cinematic shot of a shoe rotating on a pedestal"
@@ -43,13 +44,14 @@ peek install
 
 ## Generation
 
-Generation requires an explicit provider for agent workflows. Gemini uses `GEMINI_API_KEY`; xAI uses `XAI_API_KEY`; OpenRouter uses `OPENROUTER_API_KEY`. You can set those environment variables or store keys locally. Bare `peek auth` prompts for all provider keys; use `--provider` to configure just one:
+Generation requires an explicit provider for agent workflows. Gemini uses `GEMINI_API_KEY`; xAI uses `XAI_API_KEY`; OpenRouter uses `OPENROUTER_API_KEY`; OpenAI uses `OPENAI_API_KEY`. You can set those environment variables or store keys locally. Bare `peek auth` prompts for all provider keys; use `--provider` to configure just one:
 
 ```bash
 peek auth
 peek auth --provider gemini
 peek auth --provider xai
 peek auth --provider openrouter
+peek auth --provider openai
 ```
 
 ```bash
@@ -60,6 +62,11 @@ peek create image --provider gemini "A flat icon set for a payments app" --count
 peek create image --provider xai "A bold product poster for a coffee brand"
 peek create image --provider xai "Render this as a pencil sketch" --input ./reference.jpg --size 2k
 peek create image --provider xai "A flat icon set for a payments app" --count 3 --output ./artboards --json
+
+peek create image --provider openai --model gpt-image-2 "A bold product poster for a coffee brand"
+peek create image --provider openai --model gpt-image-2 "Turn this into a polished launch graphic" --input ./reference.jpg --background opaque
+peek create image --provider openai --model gpt-image-2 "A fast draft concept" --quality low --output-format jpeg --compression 60 --output ./draft.jpg
+peek create image --provider openai --model gpt-image-2 "A widescreen campaign key visual" --aspect-ratio 16:9 --moderation auto
 
 peek create video --provider gemini "A cinematic shot of a shoe rotating on a pedestal"
 peek create video --provider gemini "Animate this packaging render" --image ./packshot.png --model fast
@@ -85,6 +92,7 @@ Model aliases:
 - `peek create image --model flash` -> `gemini-3.1-flash-image-preview`
 - `peek create image --model pro` -> `gemini-3-pro-image-preview`
 - `peek create image --provider xai --model imagine` -> `grok-imagine-image`
+- `peek create image --provider openai --model gpt-image-2` -> `gpt-image-2`
 - `peek create video --model fast` -> `veo-3.1-fast-generate-preview`
 - `peek create video --model quality` -> `veo-3.1-generate-preview`
 - `peek create video --model lite` -> `veo-3.1-lite-generate-preview`

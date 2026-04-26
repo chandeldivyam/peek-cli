@@ -33,6 +33,7 @@ const imageModelAliases = new Map<string, ImageModelProfile>([
   ['gemini:flash', {alias: 'flash', model: 'gemini-3.1-flash-image-preview', defaultImageSize: '1K'}],
   ['gemini:pro', {alias: 'pro', model: 'gemini-3-pro-image-preview', defaultImageSize: '2K'}],
   ['xai:imagine', {alias: 'imagine', model: 'grok-imagine-image'}],
+  ['openai:gpt-image-2', {alias: 'gpt-image-2', model: 'gpt-image-2', defaultImageSize: '1024x1024'}],
 ]);
 
 const videoModelAliases = new Map<string, VideoModelProfile>([
@@ -87,7 +88,7 @@ const videoModelAliases = new Map<string, VideoModelProfile>([
 ]);
 
 function isGenerationProviderId(value: string): value is GenerationProviderId {
-  return value === 'gemini' || value === 'xai' || value === 'openrouter';
+  return value === 'gemini' || value === 'xai' || value === 'openrouter' || value === 'openai';
 }
 
 export interface ResolvedGenerationSource {
@@ -105,6 +106,11 @@ export interface ImageCreateRequest {
   aspectRatio?: string;
   imageSize?: string;
   personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
+  quality?: 'low' | 'medium' | 'high' | 'auto';
+  outputFormat?: 'png' | 'jpeg' | 'webp';
+  background?: 'auto' | 'opaque' | 'transparent';
+  outputCompression?: number;
+  moderation?: 'auto' | 'low';
   inputSources: ResolvedGenerationSource[];
   outputPath?: string;
   json: boolean;
@@ -152,6 +158,10 @@ export function resolveImageModelChoice(
       return {model: ''};
     }
 
+    if (provider === 'openai') {
+      return imageModelAliases.get('openai:gpt-image-2')!;
+    }
+
     return imageModelAliases.get(`${provider}:imagine`) ?? imageModelAliases.get(`${provider}:flash`)!;
   }
 
@@ -173,6 +183,17 @@ export function resolveVideoModelChoice(
       return {
         model: 'bytedance/seedance-2.0-fast',
         supportsReferenceImages: true,
+        supportsExtension: false,
+        supports4k: false,
+        supports1080p: false,
+        supportsPortrait1080p: false,
+      };
+    }
+
+    if (provider === 'openai') {
+      return {
+        model: '',
+        supportsReferenceImages: false,
         supportsExtension: false,
         supports4k: false,
         supports1080p: false,
@@ -236,6 +257,11 @@ export function buildImageCreateRequest(params: {
   aspectRatio?: string;
   imageSize?: string;
   personGeneration?: 'allow_all' | 'allow_adult' | 'allow_none';
+  quality?: 'low' | 'medium' | 'high' | 'auto';
+  outputFormat?: 'png' | 'jpeg' | 'webp';
+  background?: 'auto' | 'opaque' | 'transparent';
+  outputCompression?: number;
+  moderation?: 'auto' | 'low';
   inputSources: ResolvedGenerationSource[];
   outputPath?: string;
   json?: boolean;
@@ -260,8 +286,17 @@ export function buildImageCreateRequest(params: {
     prompt: params.prompt.trim(),
     count,
     ...(params.aspectRatio ? {aspectRatio: params.aspectRatio} : {}),
-    ...(params.imageSize ? {imageSize: params.imageSize} : modelChoice.defaultImageSize ? {imageSize: modelChoice.defaultImageSize} : {}),
+    ...(params.imageSize
+      ? {imageSize: params.imageSize}
+      : modelChoice.defaultImageSize && !params.aspectRatio
+        ? {imageSize: modelChoice.defaultImageSize}
+        : {}),
     ...(params.personGeneration ? {personGeneration: params.personGeneration} : {}),
+    ...(params.quality ? {quality: params.quality} : {}),
+    ...(params.outputFormat ? {outputFormat: params.outputFormat} : {}),
+    ...(params.background ? {background: params.background} : {}),
+    ...(typeof params.outputCompression === 'number' ? {outputCompression: params.outputCompression} : {}),
+    ...(params.moderation ? {moderation: params.moderation} : {}),
     inputSources: params.inputSources,
     ...(params.outputPath ? {outputPath: params.outputPath} : {}),
     json: params.json ?? false,
