@@ -40,6 +40,7 @@ test('agent help includes OpenRouter video and OpenAI image examples', async () 
   const {stdout} = await execFileAsync('node', ['dist/cli.js', '--agent-help']);
 
   assert.match(stdout, /--provider openrouter/);
+  assert.match(stdout, /seedream/);
   assert.match(stdout, /bytedance\/seedance-2\.0-fast/);
   assert.match(stdout, /--provider openai/);
   assert.match(stdout, /gpt-image-2/);

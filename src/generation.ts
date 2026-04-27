@@ -34,6 +34,8 @@ const imageModelAliases = new Map<string, ImageModelProfile>([
   ['gemini:pro', {alias: 'pro', model: 'gemini-3-pro-image-preview', defaultImageSize: '2K'}],
   ['xai:imagine', {alias: 'imagine', model: 'grok-imagine-image'}],
   ['openai:gpt-image-2', {alias: 'gpt-image-2', model: 'gpt-image-2', defaultImageSize: '1024x1024'}],
+  ['openrouter:seedream', {alias: 'seedream', model: 'bytedance-seed/seedream-4.5'}],
+  ['openrouter:seedream-4.5', {alias: 'seedream-4.5', model: 'bytedance-seed/seedream-4.5'}],
 ]);
 
 const videoModelAliases = new Map<string, VideoModelProfile>([
@@ -155,7 +157,7 @@ export function resolveImageModelChoice(
 
   if (!modelInput?.trim()) {
     if (provider === 'openrouter') {
-      return {model: ''};
+      return imageModelAliases.get('openrouter:seedream')!;
     }
 
     if (provider === 'openai') {

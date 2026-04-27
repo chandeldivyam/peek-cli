@@ -17,7 +17,10 @@ import {
   buildOpenAiImageEditFormData,
   buildOpenAiImageGenerationBody,
 } from '../dist/providers/openai.js';
-import {buildOpenRouterVideoRequestBody} from '../dist/providers/openrouter.js';
+import {
+  buildOpenRouterImageRequestBody,
+  buildOpenRouterVideoRequestBody,
+} from '../dist/providers/openrouter.js';
 
 async function withTempDir(run) {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'peek-gen-test-'));
@@ -67,6 +70,12 @@ test('resolveImageModelChoice maps xAI image aliases', () => {
 test('resolveImageModelChoice maps OpenAI image model', () => {
   assert.equal(resolveImageModelChoice('openai').model, 'gpt-image-2');
   assert.equal(resolveImageModelChoice('openai', 'gpt-image-2').model, 'gpt-image-2');
+});
+
+test('resolveImageModelChoice maps OpenRouter Seedream image aliases', () => {
+  assert.equal(resolveImageModelChoice('openrouter').model, 'bytedance-seed/seedream-4.5');
+  assert.equal(resolveImageModelChoice('openrouter', 'seedream').model, 'bytedance-seed/seedream-4.5');
+  assert.equal(resolveImageModelChoice('openrouter', 'seedream-4.5').model, 'bytedance-seed/seedream-4.5');
 });
 
 test('resolveVideoModelChoice maps aliases to Veo models', () => {
@@ -312,6 +321,176 @@ test('OpenAI image client detects actual PNG bytes when format differs', async (
   try {
     const outputs = await getGenerationProvider('openai').createClient('test-key').generateImages({request});
     assert.equal(outputs[0]?.mimeType, 'image/png');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('OpenRouter provider validates Seedream image controls', () => {
+  const valid = buildImageCreateRequest({
+    provider: 'openrouter',
+    model: 'seedream',
+    prompt: 'make a poster',
+    aspectRatio: '16:9',
+    imageSize: '2K',
+    inputSources: [],
+  });
+  assert.doesNotThrow(() => getGenerationProvider('openrouter').validateImageRequest(valid));
+
+  assert.throws(
+    () => {
+      const request = buildImageCreateRequest({
+        provider: 'openrouter',
+        model: 'bytedance-seed/seedream-5.0-lite',
+        prompt: 'make a poster',
+        inputSources: [],
+      });
+      getGenerationProvider('openrouter').validateImageRequest(request);
+    },
+    /supports only bytedance-seed\/seedream-4\.5/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildImageCreateRequest({
+        provider: 'openrouter',
+        prompt: 'make a poster',
+        quality: 'low',
+        inputSources: [],
+      });
+      getGenerationProvider('openrouter').validateImageRequest(request);
+    },
+    /does not support OpenAI output controls/,
+  );
+
+  assert.throws(
+    () => {
+      const request = buildImageCreateRequest({
+        provider: 'openrouter',
+        prompt: 'make a poster',
+        aspectRatio: '1:8',
+        inputSources: [],
+      });
+      getGenerationProvider('openrouter').validateImageRequest(request);
+    },
+    /aspect ratio/,
+  );
+});
+
+test('buildOpenRouterImageRequestBody maps prompt, image inputs, and image config', async () => {
+  await withTempDir(async (tempDir) => {
+    const refPath = path.join(tempDir, 'ref.png');
+    await writeFile(refPath, 'ref-bytes');
+
+    const request = buildImageCreateRequest({
+      provider: 'openrouter',
+      model: 'seedream',
+      prompt: 'polish this image',
+      aspectRatio: '16:9',
+      imageSize: '2k',
+      inputSources: [
+        createSource(refPath, [createAsset('image', refPath, 'image/png')]),
+      ],
+    });
+    const body = await buildOpenRouterImageRequestBody(request);
+
+    assert.equal(body.model, 'bytedance-seed/seedream-4.5');
+    assert.deepEqual(body.modalities, ['image']);
+    assert.deepEqual(body.image_config, {
+      aspect_ratio: '16:9',
+      image_size: '2K',
+    });
+    assert.equal(body.messages[0].role, 'user');
+    assert.equal(body.messages[0].content[0].type, 'text');
+    assert.equal(body.messages[0].content[0].text, 'polish this image');
+    assert.equal(body.messages[0].content[1].type, 'image_url');
+    assert.match(body.messages[0].content[1].image_url.url, /^data:image\/png;base64,/);
+  });
+});
+
+test('OpenRouter image client decodes base64 data URLs and preserves usage', async () => {
+  const originalFetch = globalThis.fetch;
+  const request = buildImageCreateRequest({
+    provider: 'openrouter',
+    prompt: 'make a poster',
+    inputSources: [],
+  });
+  const pngBytes = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('png-bytes'),
+  ]);
+
+  globalThis.fetch = async () =>
+    new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              images: [
+                {
+                  type: 'image_url',
+                  image_url: {
+                    url: `data:image/png;base64,${pngBytes.toString('base64')}`,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: {cost: 0.04, is_byok: false},
+      }),
+      {status: 200, headers: {'content-type': 'application/json'}},
+    );
+
+  try {
+    const outputs = await getGenerationProvider('openrouter').createClient('test-key').generateImages({request});
+    assert.equal(outputs[0]?.bytes.toString(), pngBytes.toString());
+    assert.equal(outputs[0]?.mimeType, 'image/png');
+    assert.equal(outputs[0]?.usage?.cost, 0.04);
+    assert.equal(outputs[0]?.usage?.isByok, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('OpenRouter image client issues one request per count', async () => {
+  const originalFetch = globalThis.fetch;
+  const request = buildImageCreateRequest({
+    provider: 'openrouter',
+    prompt: 'make a poster',
+    count: 2,
+    inputSources: [],
+  });
+  let requestCount = 0;
+
+  globalThis.fetch = async () => {
+    requestCount += 1;
+    return new Response(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              images: [
+                {
+                  image_url: {
+                    url: `data:image/png;base64,${Buffer.from(`image-${requestCount}`).toString('base64')}`,
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      {status: 200, headers: {'content-type': 'application/json'}},
+    );
+  };
+
+  try {
+    const outputs = await getGenerationProvider('openrouter').createClient('test-key').generateImages({request});
+    assert.equal(requestCount, 2);
+    assert.equal(outputs.length, 2);
+    assert.equal(outputs[0]?.bytes.toString(), 'image-1');
+    assert.equal(outputs[1]?.bytes.toString(), 'image-2');
   } finally {
     globalThis.fetch = originalFetch;
   }

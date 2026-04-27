@@ -1,6 +1,6 @@
 # peek-cli
 
-Media analysis and generation CLI powered by Gemini, Veo, xAI, OpenRouter video models, and OpenAI GPT Image.
+Media analysis and generation CLI powered by Gemini, Veo, xAI, OpenRouter image/video models, and OpenAI GPT Image.
 
 ## Install
 
@@ -32,6 +32,7 @@ peek inspect https://www.instagram.com/p/DWjuLqzEbJb
 peek cache clear https://www.youtube.com/shorts/SJT-eFH4Zs0
 peek create image --provider gemini "A bold product poster for a coffee brand"
 peek create image --provider xai "A bold product poster for a coffee brand"
+peek create image --provider openrouter --model seedream "A bold product poster for a coffee brand"
 peek create image --provider openai --model gpt-image-2 --quality low "A bold product poster for a coffee brand"
 peek create video --provider gemini "A cinematic shot of a shoe rotating on a pedestal"
 peek create video --provider xai --duration 10 "A cinematic shot of a shoe rotating on a pedestal"
@@ -63,6 +64,10 @@ peek create image --provider xai "A bold product poster for a coffee brand"
 peek create image --provider xai "Render this as a pencil sketch" --input ./reference.jpg --size 2k
 peek create image --provider xai "A flat icon set for a payments app" --count 3 --output ./artboards --json
 
+peek create image --provider openrouter --model seedream "A bold product poster for a coffee brand"
+peek create image --provider openrouter --model seedream "Turn this into a polished launch graphic" --input ./reference.jpg --aspect-ratio 16:9
+peek create image --provider openrouter --model seedream "A high-resolution campaign visual" --size 2K --output ./seedream.png
+
 peek create image --provider openai --model gpt-image-2 "A bold product poster for a coffee brand"
 peek create image --provider openai --model gpt-image-2 "Turn this into a polished launch graphic" --input ./reference.jpg --background opaque
 peek create image --provider openai --model gpt-image-2 "A fast draft concept" --quality low --output-format jpeg --compression 60 --output ./draft.jpg
@@ -92,12 +97,14 @@ Model aliases:
 - `peek create image --model flash` -> `gemini-3.1-flash-image-preview`
 - `peek create image --model pro` -> `gemini-3-pro-image-preview`
 - `peek create image --provider xai --model imagine` -> `grok-imagine-image`
+- `peek create image --provider openrouter --model seedream` -> `bytedance-seed/seedream-4.5`
+- `peek create image --provider openrouter --model seedream-4.5` -> `bytedance-seed/seedream-4.5`
 - `peek create image --provider openai --model gpt-image-2` -> `gpt-image-2`
 - `peek create video --model fast` -> `veo-3.1-fast-generate-preview`
 - `peek create video --model quality` -> `veo-3.1-generate-preview`
 - `peek create video --model lite` -> `veo-3.1-lite-generate-preview`
 - `peek create video --provider xai --model imagine` -> `grok-imagine-video`
-- OpenRouter uses raw model slugs only, for example `bytedance/seedance-2.0`, `bytedance/seedance-2.0-fast`, and `kwaivgi/kling-video-o1`.
+- OpenRouter image generation defaults to `bytedance-seed/seedream-4.5`, the latest ByteDance image model currently available through OpenRouter. OpenRouter video generation uses raw model slugs such as `bytedance/seedance-2.0`, `bytedance/seedance-2.0-fast`, and `kwaivgi/kling-video-o1`.
 
 Generated files are written to `./peek-output/...` by default, or to the path supplied with `--output`. Those outputs can be fed straight back into `peek`, `peek ask`, and `peek inspect`.
 
